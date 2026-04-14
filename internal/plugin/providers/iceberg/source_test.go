@@ -39,16 +39,16 @@ func TestSource_Validate(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name:      "missing URI defaults to REST and requires URI",
+			name:      "missing URI defaults to REST",
 			config:    plugin.RawPluginConfig{},
-			expectErr: true,
+			expectErr: false,
 		},
 		{
-			name: "invalid URI",
+			name: "with URI",
 			config: plugin.RawPluginConfig{
-				"uri": "not-a-valid-url",
+				"uri": "http://localhost:8181",
 			},
-			expectErr: true,
+			expectErr: false,
 		},
 		{
 			name: "config with tags",
@@ -98,11 +98,11 @@ func TestSource_Validate(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "REST config requires URI",
+			name: "REST config without URI",
 			config: plugin.RawPluginConfig{
 				"catalog_type": "rest",
 			},
-			expectErr: true,
+			expectErr: false,
 		},
 		{
 			name: "invalid catalog_type",
@@ -135,7 +135,6 @@ func TestSource_ValidateStoresConfig(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, s.config)
-		assert.Equal(t, "http://localhost:8181", s.config.URI)
 		assert.Equal(t, "rest", s.config.CatalogType)
 	})
 

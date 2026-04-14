@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"testing"
 
+	"github.com/marmotdata/marmot/internal/core/connection/providers/clickhouse"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,12 @@ func TestSource_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config with defaults",
+			name: "empty config",
+			config: plugin.RawPluginConfig{},
+			wantErr: false,
+		},
+		{
+			name: "config with connection fields",
 			config: plugin.RawPluginConfig{
 				"host": "localhost",
 				"user": "default",
@@ -35,25 +41,7 @@ func TestSource_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing host",
-			config: plugin.RawPluginConfig{
-				"user":     "default",
-				"password": "password",
-			},
-			wantErr:     true,
-			errContains: "host",
-		},
-		{
-			name: "missing user",
-			config: plugin.RawPluginConfig{
-				"host":     "localhost",
-				"password": "password",
-			},
-			wantErr:     true,
-			errContains: "user",
-		},
-		{
-			name: "valid config with secure connection",
+			name: "config with secure connection",
 			config: plugin.RawPluginConfig{
 				"host":   "clickhouse.example.com",
 				"user":   "admin",
@@ -62,10 +50,8 @@ func TestSource_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config with filters",
+			name: "config with filters",
 			config: plugin.RawPluginConfig{
-				"host": "localhost",
-				"user": "default",
 				"filter": map[string]interface{}{
 					"include": []interface{}{"^analytics.*"},
 					"exclude": []interface{}{".*_temp$"},
@@ -93,32 +79,19 @@ func TestSource_Validate(t *testing.T) {
 }
 
 func TestSource_ValidateDefaults(t *testing.T) {
+	// Validate no longer sets connConfig - it's set by Discover
 	s := &Source{}
-	_, err := s.Validate(plugin.RawPluginConfig{
-		"host": "localhost",
-		"user": "default",
-	})
+	_, err := s.Validate(plugin.RawPluginConfig{})
 
 	require.NoError(t, err)
 	require.NotNil(t, s.config)
-
-	assert.Equal(t, 9000, s.config.Port)
-	assert.Equal(t, "default", s.config.Database)
-	assert.False(t, s.config.Secure)
 }
 
 func TestConfig_Defaults(t *testing.T) {
-	config := &Config{
-		Host: "localhost",
-		User: "default",
-	}
+	config := &clickhouse.ClickHouseConfig{}
 
 	assert.Equal(t, "", config.Password)
 	assert.Equal(t, 0, config.Port)
 	assert.Equal(t, "", config.Database)
 	assert.False(t, config.Secure)
-	assert.False(t, config.IncludeDatabases)
-	assert.False(t, config.IncludeColumns)
-	assert.False(t, config.EnableMetrics)
-	assert.False(t, config.ExcludeSystemTables)
 }

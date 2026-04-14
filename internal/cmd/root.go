@@ -24,6 +24,21 @@ import (
 	_ "github.com/marmotdata/marmot/internal/plugin/providers/s3"
 	_ "github.com/marmotdata/marmot/internal/plugin/providers/sns"
 	_ "github.com/marmotdata/marmot/internal/plugin/providers/sqs"
+
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/airflow"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/azureblob"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/bigquery"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/clickhouse"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/gcs"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/iceberg"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/kafka"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/mongodb"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/mysql"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/nats"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/postgresql"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/redis"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/trino"
 )
 
 var (

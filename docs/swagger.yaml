@@ -291,6 +291,100 @@ definitions:
           type: string
         type: array
     type: object
+  connection.ConfigField:
+    properties:
+      default: {}
+      description:
+        type: string
+      fields:
+        items:
+          $ref: '#/definitions/connection.ConfigField'
+        type: array
+      is_array:
+        type: boolean
+      label:
+        type: string
+      name:
+        type: string
+      options:
+        items:
+          $ref: '#/definitions/connection.FieldOption'
+        type: array
+      placeholder:
+        type: string
+      required:
+        type: boolean
+      sensitive:
+        type: boolean
+      show_when:
+        $ref: '#/definitions/connection.ShowWhen'
+      type:
+        $ref: '#/definitions/connection.FieldType'
+      validation:
+        $ref: '#/definitions/connection.Validation'
+    type: object
+  connection.ConnectionTypeMeta:
+    properties:
+      category:
+        type: string
+      config_spec:
+        items:
+          $ref: '#/definitions/connection.ConfigField'
+        type: array
+      description:
+        type: string
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  connection.FieldOption:
+    properties:
+      label:
+        type: string
+      value:
+        type: string
+    type: object
+  connection.FieldType:
+    enum:
+    - string
+    - int
+    - bool
+    - select
+    - multiselect
+    - password
+    - object
+    type: string
+    x-enum-varnames:
+    - FieldTypeString
+    - FieldTypeInt
+    - FieldTypeBool
+    - FieldTypeSelect
+    - FieldTypeMultiselect
+    - FieldTypePassword
+    - FieldTypeObject
+  connection.ShowWhen:
+    properties:
+      field:
+        type: string
+      value:
+        type: string
+    type: object
+  connection.Validation:
+    properties:
+      max:
+        type: integer
+      max_len:
+        type: integer
+      min:
+        type: integer
+      min_len:
+        type: integer
+      pattern:
+        type: string
+    type: object
   dataproduct.ImagePurpose:
     enum:
     - icon
@@ -685,7 +779,11 @@ definitions:
     properties:
       config:
         additionalProperties: true
+        description: 'Legacy: kept temporarily for migration'
         type: object
+      connection_id:
+        description: Reference to Connection entity (nullable for backward compatibility)
+        type: string
       created_at:
         type: string
       created_by:
@@ -1277,6 +1375,82 @@ definitions:
       user_description:
         type: string
     type: object
+  v1_connections.ConnectionResponse:
+    properties:
+      config:
+        additionalProperties: true
+        description: Config with sensitive values redacted
+        type: object
+      created_at:
+        type: string
+      created_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  v1_connections.CreateRequest:
+    properties:
+      config:
+        additionalProperties: true
+        description: Configuration as flat map - sensitive fields encrypted based
+          on type's ConfigSpec
+        type: object
+      description:
+        type: string
+      name:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      type:
+        type: string
+    required:
+    - config
+    - name
+    - type
+    type: object
+  v1_connections.ListResponse:
+    properties:
+      connections:
+        items:
+          $ref: '#/definitions/v1_connections.ConnectionResponse'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  v1_connections.UpdateRequest:
+    properties:
+      config:
+        additionalProperties: true
+        description: Configuration as flat map - sensitive fields encrypted based
+          on type's ConfigSpec
+        type: object
+      description:
+        type: string
+      name:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
   v1_glossary.CreateTermRequest:
     properties:
       definition:
@@ -1616,6 +1790,8 @@ definitions:
       config:
         additionalProperties: true
         type: object
+      connection_id:
+        type: string
       cron_expression:
         type: string
       enabled:
@@ -1656,6 +1832,8 @@ definitions:
       config:
         additionalProperties: true
         type: object
+      connection_id:
+        type: string
       cron_expression:
         type: string
       enabled:
@@ -3639,6 +3817,167 @@ paths:
       summary: Initiate OAuth login
       tags:
       - auth
+  /connections:
+    get:
+      description: List all connections with optional filtering
+      parameters:
+      - description: Filter by plugin type
+        in: query
+        name: type
+        type: string
+      - description: Limit number of results
+        in: query
+        name: limit
+        type: integer
+      - description: Offset for pagination
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1_connections.ListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: List connections
+      tags:
+      - connections
+    post:
+      consumes:
+      - application/json
+      description: Create a new data source connection
+      parameters:
+      - description: Connection creation request
+        in: body
+        name: connection
+        required: true
+        schema:
+          $ref: '#/definitions/v1_connections.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/v1_connections.ConnectionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: Create a new connection
+      tags:
+      - connections
+  /connections/{id}:
+    delete:
+      description: Delete a connection by ID, optionally tearing down associated schedules
+      parameters:
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Delete all schedules using this connection
+        in: query
+        name: teardown
+        type: boolean
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: Delete a connection
+      tags:
+      - connections
+    get:
+      description: Get a connection by ID
+      parameters:
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1_connections.ConnectionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: Get a connection
+      tags:
+      - connections
+    put:
+      consumes:
+      - application/json
+      description: Update an existing connection
+      parameters:
+      - description: Connection ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Connection update request
+        in: body
+        name: connection
+        required: true
+        schema:
+          $ref: '#/definitions/v1_connections.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1_connections.ConnectionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: Update a connection
+      tags:
+      - connections
+  /connections/types:
+    get:
+      description: Get all available connection types with their configuration specifications
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/connection.ConnectionTypeMeta'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse'
+      summary: List available connection types
+      tags:
+      - connections
   /glossary/:
     post:
       consumes:

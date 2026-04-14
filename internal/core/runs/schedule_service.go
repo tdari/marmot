@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/marmotdata/marmot/internal/core/connection"
+	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/robfig/cron/v3"
 )
 
@@ -15,8 +17,9 @@ func parseCronExpression(cronExpr string) (cron.Schedule, error) {
 }
 
 type ScheduleService struct {
-	repo        ScheduleRepository
-	broadcaster EventBroadcaster
+	repo              ScheduleRepository
+	broadcaster       EventBroadcaster
+	connectionService connection.Service
 }
 
 func NewScheduleService(repo ScheduleRepository) *ScheduleService {
@@ -31,12 +34,22 @@ func (s *ScheduleService) SetBroadcaster(broadcaster EventBroadcaster) {
 	s.broadcaster = broadcaster
 }
 
+// SetConnectionService sets the connection service for validating schedule connection references.
+func (s *ScheduleService) SetConnectionService(connectionService connection.Service) {
+	s.connectionService = connectionService
+}
+
 // Schedule operations
 
-func (s *ScheduleService) CreateSchedule(ctx context.Context, name, pluginID string, config map[string]interface{}, cronExpression string, enabled bool, createdBy *string) (*Schedule, error) {
+func (s *ScheduleService) CreateSchedule(ctx context.Context, name, pluginID string, connectionID *string, config map[string]interface{}, cronExpression string, enabled bool, createdBy *string) (*Schedule, error) {
+	if err := s.validateScheduleConnection(ctx, pluginID, connectionID); err != nil {
+		return nil, err
+	}
+
 	schedule := &Schedule{
 		Name:           name,
 		PluginID:       pluginID,
+		ConnectionID:   connectionID,
 		Config:         config,
 		CronExpression: cronExpression,
 		Enabled:        enabled,
@@ -58,7 +71,11 @@ func (s *ScheduleService) GetScheduleByName(ctx context.Context, name string) (*
 	return s.repo.GetScheduleByName(ctx, name)
 }
 
-func (s *ScheduleService) UpdateSchedule(ctx context.Context, id string, name, pluginID string, config map[string]interface{}, cronExpression string, enabled bool) (*Schedule, error) {
+func (s *ScheduleService) UpdateSchedule(ctx context.Context, id string, name, pluginID string, connectionID *string, config map[string]interface{}, cronExpression string, enabled bool) (*Schedule, error) {
+	if err := s.validateScheduleConnection(ctx, pluginID, connectionID); err != nil {
+		return nil, err
+	}
+
 	existing, err := s.repo.GetSchedule(ctx, id)
 	if err != nil {
 		return nil, err
@@ -66,7 +83,10 @@ func (s *ScheduleService) UpdateSchedule(ctx context.Context, id string, name, p
 
 	existing.Name = name
 	existing.PluginID = pluginID
-	existing.Config = config
+	existing.ConnectionID = connectionID
+	if config != nil {
+		existing.Config = config
+	}
 	existing.CronExpression = cronExpression
 	existing.Enabled = enabled
 
@@ -77,12 +97,49 @@ func (s *ScheduleService) UpdateSchedule(ctx context.Context, id string, name, p
 	return existing, nil
 }
 
+func (s *ScheduleService) validateScheduleConnection(ctx context.Context, pluginID string, connectionID *string) error {
+	if connectionID == nil {
+		return fmt.Errorf("connection_id is required")
+	}
+
+	if s.connectionService == nil {
+		return fmt.Errorf("connection service not configured")
+	}
+
+	conn, err := s.connectionService.Get(ctx, *connectionID)
+	if err != nil {
+		return fmt.Errorf("getting connection: %w", err)
+	}
+
+	compatibleTypes := []string{pluginID}
+	if entry, err := plugin.GetRegistry().Get(pluginID); err == nil && len(entry.Meta.ConnectionTypes) > 0 {
+		compatibleTypes = entry.Meta.ConnectionTypes
+	}
+
+	compatible := false
+	for _, t := range compatibleTypes {
+		if conn.Type == t {
+			compatible = true
+			break
+		}
+	}
+	if !compatible {
+		return ErrConnectionTypeMismatch
+	}
+
+	return nil
+}
+
 func (s *ScheduleService) DeleteSchedule(ctx context.Context, id string) error {
 	return s.repo.DeleteSchedule(ctx, id)
 }
 
 func (s *ScheduleService) ListSchedules(ctx context.Context, enabled *bool, limit, offset int) ([]*Schedule, int, error) {
 	return s.repo.ListSchedules(ctx, enabled, limit, offset)
+}
+
+func (s *ScheduleService) ListSchedulesByConnectionID(ctx context.Context, connectionID string) ([]*Schedule, error) {
+	return s.repo.ListSchedulesByConnectionID(ctx, connectionID)
 }
 
 func (s *ScheduleService) GetSchedulesDueForRun(ctx context.Context, limit int) ([]*Schedule, error) {

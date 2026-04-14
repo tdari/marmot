@@ -76,16 +76,12 @@ import { Collapsible } from "@site/src/components/Collapsible";
 
 ```yaml
 
-credentials:
-  region: "us-east-1"
-  profile: "production"
-  role: "<role>"
-tags:
-  - "aws"
 discover_jobs: true
 discover_databases: true
 discover_tables: true
 discover_crawlers: true
+tags:
+  - "aws"
 
 ```
 
@@ -94,7 +90,6 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| credentials | AWSCredentials | false | AWS credentials configuration |
 | discover_crawlers | bool | false | Whether to discover Glue crawlers |
 | discover_databases | bool | false | Whether to discover Glue databases |
 | discover_jobs | bool | false | Whether to discover Glue jobs |

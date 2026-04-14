@@ -57,9 +57,6 @@ auth_backends = airflow.api.auth.backend.basic_auth
 
 ```yaml
 
-host: "http://localhost:8080"
-username: "admin"
-password: "${AIRFLOW_PASSWORD}"
 discover_dags: true
 discover_tasks: true
 discover_datasets: true
@@ -82,19 +79,15 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| api_token | string | false | API token for authentication (alternative to basic auth) |
-| discover_dags | bool | false | Discover Airflow DAGs as Pipeline assets |
+| Discover DAGs | bool | false | Discover Airflow DAGs as Pipeline assets |
 | discover_datasets | bool | false | Discover Airflow Datasets for lineage (requires Airflow 2.4+) |
 | discover_tasks | bool | false | Discover tasks within DAGs |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | Airflow webserver URL (e.g., http://localhost:8080) |
 | include_run_history | bool | false | Include DAG run history in metadata |
 | only_active | bool | false | Only discover active (unpaused) DAGs |
-| password | string | false | Password for basic authentication |
 | run_history_days | int | false | Number of days of run history to fetch |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| username | string | false | Username for basic authentication |
 
 ## Available Metadata
 

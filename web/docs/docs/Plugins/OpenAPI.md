@@ -52,7 +52,7 @@ The following configuration options are available:
 |----------|------|----------|-------------|
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| spec_path | string | false | Path to the directory containing the OpenAPI specifications |
+| spec_path | string | true | Path to the directory containing the OpenAPI specifications |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
 
 ## Available Metadata

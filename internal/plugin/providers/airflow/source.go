@@ -13,21 +13,19 @@ import (
 	"time"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/airflow"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for Airflow plugin
+// Config for Airflow plugin (discovery/pipeline fields only).
+// Connection fields (host, username, password, api_token) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-
-	Host     string `json:"host" description:"Airflow webserver URL (e.g., http://localhost:8080)" validate:"required,url"`
-	Username string `json:"username,omitempty" description:"Username for basic authentication"`
-	Password string `json:"password,omitempty" description:"Password for basic authentication" sensitive:"true"`
-	APIToken string `json:"api_token,omitempty" label:"API Token" description:"API token for authentication (alternative to basic auth)" sensitive:"true"`
 
 	DiscoverDAGs     bool `json:"discover_dags" label:"Discover DAGs" description:"Discover Airflow DAGs as Pipeline assets" default:"true"`
 	DiscoverTasks    bool `json:"discover_tasks" description:"Discover tasks within DAGs" default:"true"`
@@ -41,9 +39,6 @@ type Config struct {
 
 // +marmot:example-config
 var _ = `
-host: "http://localhost:8080"
-username: "admin"
-password: "${AIRFLOW_PASSWORD}"
 discover_dags: true
 discover_tasks: true
 discover_datasets: true
@@ -62,8 +57,9 @@ tags:
 
 // Source implements the Airflow plugin.
 type Source struct {
-	config *Config
-	client *Client
+	config     *Config
+	connConfig *airflow.AirflowConfig
+	client     *Client
 }
 
 // Validate validates and normalizes the plugin configuration.
@@ -73,21 +69,21 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	config.Host = strings.TrimSuffix(config.Host, "/")
-
 	if config.RunHistoryDays <= 0 {
 		config.RunHistoryDays = 7
-	}
-
-	if config.Username == "" && config.APIToken == "" {
-		return nil, fmt.Errorf("authentication required: provide either username/password or api_token")
 	}
 
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
 	}
 
+	connConfig, err := plugin.UnmarshalPluginConfig[airflow.AirflowConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -98,13 +94,19 @@ func (s *Source) Discover(ctx context.Context, rawConfig plugin.RawPluginConfig)
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 	s.config = config
-	s.config.Host = strings.TrimSuffix(s.config.Host, "/")
+
+	connConfig, err := plugin.UnmarshalPluginConfig[airflow.AirflowConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+	connConfig.Host = strings.TrimSuffix(connConfig.Host, "/")
+	s.connConfig = connConfig
 
 	s.client = NewClient(ClientConfig{
-		BaseURL:  s.config.Host,
-		Username: s.config.Username,
-		Password: s.config.Password,
-		APIToken: s.config.APIToken,
+		BaseURL:  s.connConfig.Host,
+		Username: s.connConfig.Username,
+		Password: s.connConfig.Password,
+		APIToken: s.connConfig.APIToken,
 	})
 
 	var assets []asset.Asset

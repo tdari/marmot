@@ -46,12 +46,9 @@ GRANT SELECT ON information_schema.* TO 'marmot_reader'@'%';
 
 ```yaml
 
-host: "mysql-prod.internal"
-port: 3306
-user: "marmot_user"
-password: "mysql_secure_pass"
-database: "ecommerce"
-tls: "true"
+include_columns: true
+include_row_counts: true
+discover_foreign_keys: true
 tags:
   - "mysql"
   - "ecommerce"
@@ -63,18 +60,12 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| database | string | false | Database name to connect to |
 | discover_foreign_keys | bool | false | Whether to discover foreign key relationships |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | MySQL server hostname or IP address |
 | include_columns | bool | false | Whether to include column information in table metadata |
 | include_row_counts | bool | false | Whether to include approximate row counts |
-| password | string | false | Password for authentication |
-| port | int | false | MySQL server port |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| tls | string | false | TLS configuration (false, true, skip-verify, preferred) |
-| user | string | false | Username for authentication |
 
 ## Available Metadata
 

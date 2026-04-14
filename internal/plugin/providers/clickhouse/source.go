@@ -16,23 +16,19 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionclickhouse "github.com/marmotdata/marmot/internal/core/connection/providers/clickhouse"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for ClickHouse plugin.
+// Config for ClickHouse plugin (discovery/pipeline fields only).
+// Connection fields (host, port, user, password, database, secure) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-
-	Host     string `json:"host" description:"ClickHouse server hostname or IP address" validate:"required"`
-	Port     int    `json:"port" description:"ClickHouse native protocol port" default:"9000" validate:"omitempty,min=1,max=65535"`
-	User     string `json:"user" description:"Username for authentication" validate:"required"`
-	Password string `json:"password" description:"Password for authentication" sensitive:"true"`
-	Database string `json:"database" description:"Default database to connect to" default:"default"`
-	Secure   bool   `json:"secure" description:"Use TLS/SSL connection" default:"false"`
 
 	IncludeDatabases    bool `json:"include_databases" description:"Whether to discover databases" default:"true"`
 	IncludeColumns      bool `json:"include_columns" description:"Whether to include column information in table metadata" default:"true"`
@@ -42,12 +38,6 @@ type Config struct {
 
 // +marmot:example-config
 var _ = `
-host: "clickhouse.company.com"
-port: 9000
-user: "default"
-password: "${CLICKHOUSE_PASSWORD}"
-database: "default"
-secure: false
 include_databases: true
 include_columns: true
 enable_metrics: true
@@ -64,8 +54,9 @@ tags:
 
 // Source represents the ClickHouse plugin.
 type Source struct {
-	config *Config
-	conn   clickhouse.Conn
+	config     *Config
+	connConfig *connectionclickhouse.ClickHouseConfig
+	conn       clickhouse.Conn
 }
 
 // Validate validates and normalizes the plugin configuration.
@@ -73,14 +64,6 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 	config, err := plugin.UnmarshalPluginConfig[Config](rawConfig)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
-	}
-
-	if config.Port == 0 {
-		config.Port = 9000
-	}
-
-	if config.Database == "" {
-		config.Database = "default"
 	}
 
 	if err := plugin.ValidateStruct(config); err != nil {
@@ -93,6 +76,12 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 
 // Discover discovers ClickHouse databases, tables, and views.
 func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConfig) (*plugin.DiscoveryResult, error) {
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionclickhouse.ClickHouseConfig](pluginConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+	s.connConfig = connConfig
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
@@ -159,11 +148,11 @@ func (s *Source) initConnection(ctx context.Context) error {
 	s.closeConnection()
 
 	options := &clickhouse.Options{
-		Addr: []string{fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)},
+		Addr: []string{fmt.Sprintf("%s:%d", s.connConfig.Host, s.connConfig.Port)},
 		Auth: clickhouse.Auth{
-			Database: s.config.Database,
-			Username: s.config.User,
-			Password: s.config.Password,
+			Database: s.connConfig.Database,
+			Username: s.connConfig.User,
+			Password: s.connConfig.Password,
 		},
 		Settings: clickhouse.Settings{
 			"max_execution_time": 60,
@@ -174,7 +163,7 @@ func (s *Source) initConnection(ctx context.Context) error {
 		ConnMaxLifetime: 2 * time.Minute,
 	}
 
-	if s.config.Secure {
+	if s.connConfig.Secure {
 		options.TLS = &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
@@ -190,9 +179,9 @@ func (s *Source) initConnection(ctx context.Context) error {
 	}
 
 	log.Debug().
-		Str("host", s.config.Host).
-		Int("port", s.config.Port).
-		Str("database", s.config.Database).
+		Str("host", s.connConfig.Host).
+		Int("port", s.connConfig.Port).
+		Str("database", s.connConfig.Database).
 		Msg("Successfully connected to ClickHouse")
 
 	s.conn = conn
@@ -233,8 +222,8 @@ func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 		}
 
 		metadata := map[string]interface{}{
-			"host":     s.config.Host,
-			"port":     s.config.Port,
+			"host":     s.connConfig.Host,
+			"port":     s.connConfig.Port,
 			"database": name,
 			"engine":   engine,
 		}
@@ -312,8 +301,8 @@ func (s *Source) discoverTables(ctx context.Context, dbName string) ([]asset.Ass
 		}
 
 		metadata := map[string]interface{}{
-			"host":       s.config.Host,
-			"port":       s.config.Port,
+			"host":       s.connConfig.Host,
+			"port":       s.connConfig.Port,
 			"database":   dbName,
 			"table_name": name,
 			"engine":     engine,

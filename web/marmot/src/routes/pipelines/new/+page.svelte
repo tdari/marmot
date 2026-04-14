@@ -12,6 +12,7 @@
 	import Step from '$components/ui/Step.svelte';
 	import cronstrue from 'cronstrue';
 	import { Cron } from 'croner';
+	import type { Connection } from '$lib/connections/types';
 
 	interface ConfigField {
 		name: string;
@@ -40,11 +41,17 @@
 		icon?: string;
 		category?: string;
 		config_spec?: ConfigField[];
+		connection_types?: string[];
 	}
 
 	let plugins = $state<Plugin[]>([]);
 	let loadingPlugins = $state(true);
 	let selectedPluginId = $state('');
+	let connections = $state<Connection[]>([]);
+
+	let loadingConnections = $state(true);
+	let selectedConnectionId = $state('');
+	let connectionSearchQuery = $state('');
 	let name = $state('');
 	let cronExpression = $state('');
 	let disableSchedule = $state(false);
@@ -66,19 +73,13 @@
 	let validating = $state(false);
 	let fieldErrors = $state<Record<string, string>>({});
 	let expandedSections = $state<Record<string, boolean>>({});
-	let awsCredentialStatus = $state<{
-		available: boolean;
-		sources: string[];
-		error?: string;
-	} | null>(null);
-	let loadingAwsStatus = $state(false);
 
 	let totalSteps = $state(0);
 
 	let canProceedToStep2 = $derived(name.trim() !== '');
 	let canProceedToStep3 = $derived(selectedPluginId !== '');
 	let configValidated = $state(false);
-	let canProceedToStep4 = $derived(configValidated); // Must validate config first
+	let canProceedToStep4 = $derived(configValidated && selectedConnectionId !== ''); // Must validate config and select connection
 
 	function canNavigateToStep(stepNumber: number): boolean {
 		if (stepNumber === 2) return canProceedToStep2;
@@ -91,9 +92,6 @@
 
 	let configSpec = $derived(selectedPlugin?.config_spec || null);
 
-	let isAWSPlugin = $derived(
-		selectedPluginId && ['s3', 'sns', 'sqs', 'dynamodb', 'kinesis'].includes(selectedPluginId)
-	);
 	let hasSchedule = $derived(cronExpression.trim() !== '');
 
 	let cronDescription = $derived.by(() => {
@@ -151,6 +149,21 @@
 		}
 	}
 
+	async function fetchConnections() {
+		try {
+			loadingConnections = true;
+			const response = await fetchApi('/connections?limit=1000');
+			if (!response.ok) throw new Error('Failed to fetch connections');
+			const data = await response.json();
+			connections = data.connections || [];
+		} catch (err) {
+			console.error('Error fetching connections:', err);
+			// Don't set error here as connections are optional
+		} finally {
+			loadingConnections = false;
+		}
+	}
+
 	async function handleSave() {
 		try {
 			saving = true;
@@ -158,13 +171,17 @@
 
 			const enabled = cronExpression.trim() === '' ? true : !disableSchedule;
 
-			const body = {
+			const body: Record<string, any> = {
 				name,
 				plugin_id: selectedPluginId,
-				config,
+				config: { ...config },
 				cron_expression: cronExpression,
 				enabled
 			};
+
+			if (selectedConnectionId) {
+				body.connection_id = selectedConnectionId;
+			}
 
 			const response = await fetchApi('/ingestion/schedules', {
 				method: 'POST',
@@ -185,77 +202,23 @@
 		}
 	}
 
-	function initializeConfigDefaults(fields: ConfigField[], configObj: Record<string, any> = {}) {
-		for (const field of fields) {
-			if (field.type === 'object' && field.is_array) {
-				configObj[field.name] = [];
-			} else if (field.type === 'object' && field.fields) {
-				configObj[field.name] = {};
-				initializeConfigDefaults(field.fields, configObj[field.name]);
-			} else if (field.type === 'multiselect') {
-				configObj[field.name] = [];
-			} else if (field.default !== undefined && field.default !== null) {
-				configObj[field.name] = field.default;
-			}
-		}
-		return configObj;
-	}
-
-	async function fetchAWSCredentialStatus() {
-		try {
-			loadingAwsStatus = true;
-			const response = await fetchApi('/plugins/aws/credentials/status');
-			if (response.ok) {
-				awsCredentialStatus = await response.json();
-				// If credentials are available, set use_default to true by default
-				if (awsCredentialStatus?.available) {
-					// Ensure credentials object exists
-					if (!config.credentials) {
-						config.credentials = {};
-					}
-					// Set use_default to true (reactive assignment)
-					config = {
-						...config,
-						credentials: {
-							...config.credentials,
-							use_default: true
-						}
-					};
-				}
-			}
-		} catch (err) {
-			console.error('Error fetching AWS credential status:', err);
-		} finally {
-			loadingAwsStatus = false;
-		}
-	}
-
 	function handlePluginChange(pluginId: string) {
 		selectedPluginId = pluginId;
-		// Reset config but preserve base fields (tags, external_links, filter)
+		// Reset config to base structure only
+		// Connection fields come from selected connection
+		// Discovery fields are set explicitly by user
 		const savedTags = config.tags || [];
 		const savedLinks = config.external_links || [];
 		const savedFilter = config.filter || { include: [], exclude: [] };
-		config = {};
+		
+		config = {
+			tags: savedTags,
+			external_links: savedLinks,
+			filter: savedFilter
+		};
+		
 		fieldErrors = {};
 		configValidated = false;
-		awsCredentialStatus = null;
-
-		// Find selected plugin and populate defaults
-		const plugin = plugins.find((p) => p.id === pluginId);
-		if (plugin && plugin.config_spec) {
-			config = initializeConfigDefaults(plugin.config_spec);
-		}
-
-		// Restore base fields
-		config.tags = savedTags;
-		config.external_links = savedLinks;
-		config.filter = savedFilter;
-
-		// Check if this is an AWS plugin and fetch credential status
-		if (['s3', 'sns', 'sqs', 'dynamodb', 'kinesis'].includes(pluginId)) {
-			fetchAWSCredentialStatus();
-		}
 	}
 
 	function getNestedValue(obj: any, path: string): any {
@@ -303,7 +266,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					plugin_id: selectedPluginId,
-					config: config
+					config: config,
+					connection_id: selectedConnectionId || undefined
 				})
 			});
 
@@ -390,8 +354,15 @@
 			return;
 		}
 
-		// Step 3: Configuration - validate config
+		// Step 3: Configuration - validate connection and config
 		if (currentStep === 3) {
+			// Check if connection is selected
+			if (!selectedConnectionId) {
+				error = 'Please select a connection';
+				window.scrollTo({ top: 0, behavior: 'smooth' });
+				return;
+			}
+
 			// Check for client-side validation errors first
 			if (Object.keys(fieldErrors).length > 0) {
 				error = 'Please fix validation errors before proceeding';
@@ -399,11 +370,11 @@
 				return;
 			}
 
-			const isValid = await validateConfig();
-			if (!isValid) {
-				// Error message and scroll already handled in validateConfig
-				return;
-			}
+			// When a connection is selected, skip backend plugin validation
+			// because the validate endpoint doesn't support connection_id and will
+			// fail on missing connection fields (host, user, etc.) that are
+			// provided by the connection at execution time.
+			configValidated = true;
 			error = null;
 			currentStep++;
 			return;
@@ -468,6 +439,7 @@
 			return;
 		}
 		fetchPlugins();
+		fetchConnections();
 	});
 </script>
 
@@ -816,6 +788,118 @@
 
 		<!-- Step 3: Plugin Configuration -->
 		{#if currentStep === 3}
+			<!-- Connection Selector -->
+			<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+				<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+					<IconifyIcon
+						icon="material-symbols:link"
+						class="h-5 w-5 mr-2 text-earthy-terracotta-600"
+					/>
+					Select Connection <span class="text-red-500 ml-1">*</span>
+				</h3>
+				<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+					Choose an existing connection to use for this pipeline
+				</p>
+				
+				{#if loadingConnections}
+					<div class="flex items-center justify-center py-8 border border-gray-300 dark:border-gray-600 rounded-lg">
+						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-earthy-terracotta-700"></div>
+						<span class="ml-3 text-sm text-gray-500">Loading connections...</span>
+					</div>
+				{:else if connections.length === 0}
+					<div class="py-8 px-4 border-2 border-dashed border-red-300 dark:border-red-600 rounded-lg text-center">
+						<IconifyIcon
+							icon="material-symbols:link-off"
+							class="h-10 w-10 text-red-400 mx-auto mb-3"
+						/>
+						<p class="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+							No connections available
+						</p>
+						<p class="text-sm text-red-700 dark:text-red-300">
+							You need to create a connection before creating a pipeline.
+						</p>
+					</div>
+				{:else}
+					<!-- Connection Search -->
+					<div class="mb-4">
+						<div class="relative">
+							<IconifyIcon
+								icon="material-symbols:search"
+								class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400"
+							/>
+							<input
+								type="text"
+								bind:value={connectionSearchQuery}
+								placeholder="Search connections..."
+								class="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-earthy-terracotta-600 focus:border-transparent transition-all"
+							/>
+						</div>
+					</div>
+
+					<!-- Connection List -->
+					{@const compatibleTypes = selectedPlugin?.connection_types?.length ? selectedPlugin.connection_types : [selectedPluginId]}
+					{@const filteredConnections = connections.filter(conn =>
+						compatibleTypes.includes(conn.type) &&
+						(connectionSearchQuery === '' ||
+						conn.name.toLowerCase().includes(connectionSearchQuery.toLowerCase()) ||
+						conn.type.toLowerCase().includes(connectionSearchQuery.toLowerCase()) ||
+						conn.description?.toLowerCase().includes(connectionSearchQuery.toLowerCase()))
+					)}
+					
+					{#if filteredConnections.length === 0}
+						<p class="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
+							{#if connectionSearchQuery}
+								No connections found matching "{connectionSearchQuery}"
+							{:else}
+								No compatible connections found. Create a {compatibleTypes.join(' or ')} connection first.
+							{/if}
+						</p>
+					{:else}
+						<div class="space-y-2 max-h-80 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+							{#each filteredConnections as conn}
+								<button
+									type="button"
+									onclick={() => selectedConnectionId = conn.id}
+									class="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors flex items-center gap-3 {selectedConnectionId === conn.id ? 'bg-earthy-terracotta-50 dark:bg-earthy-terracotta-900/20 border-2 border-earthy-terracotta-500' : 'border-b border-gray-200 dark:border-gray-700'}"
+								>
+									<div class="flex-shrink-0">
+										{#if selectedConnectionId === conn.id}
+											<div class="h-6 w-6 rounded-full bg-earthy-terracotta-600 flex items-center justify-center">
+												<IconifyIcon icon="material-symbols:check" class="h-4 w-4 text-white" />
+											</div>
+										{:else}
+											<div class="h-6 w-6 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
+										{/if}
+									</div>
+									<div class="flex-1 min-w-0">
+										<div class="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
+											{conn.name}
+										</div>
+										<div class="flex items-center gap-2 mt-0.5">
+											<span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+												{conn.type}
+											</span>
+											{#if conn.description}
+												<span class="text-xs text-gray-500 dark:text-gray-400 truncate">
+													{conn.description}
+												</span>
+											{/if}
+										</div>
+									</div>
+									{#if !conn.is_active}
+										<div class="flex-shrink-0">
+											<span class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300">
+												Inactive
+											</span>
+										</div>
+									{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				{/if}
+			</div>
+
 			{#if configSpec && configSpec.length > 0}
 				<div
 					class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6"
@@ -826,7 +910,7 @@
 								icon="material-symbols:settings"
 								class="h-5 w-5 mr-2 text-earthy-terracotta-600"
 							/>
-							Connection Configuration
+							Additional Configuration
 						</h3>
 						{#if Object.keys(fieldErrors).length > 0}
 							<span class="text-sm text-red-600 dark:text-red-400 flex items-center">
@@ -838,66 +922,6 @@
 						{/if}
 					</div>
 
-					<!-- AWS Credential Status Banner -->
-					{#if isAWSPlugin && awsCredentialStatus}
-						{#if awsCredentialStatus.available}
-							<div
-								class="mb-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded-lg p-4"
-							>
-								<div class="flex items-start">
-									<IconifyIcon
-										icon="material-symbols:check-circle"
-										class="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0"
-									/>
-									<div class="ml-3 flex-1">
-										<h4 class="text-sm font-semibold text-green-900 dark:text-green-100">
-											AWS Credentials Detected
-										</h4>
-										<p class="text-sm text-green-700 dark:text-green-300 mt-1">
-											Credentials found from: {awsCredentialStatus.sources.join(', ')}
-										</p>
-										<p class="text-xs text-green-600 dark:text-green-400 mt-2">
-											You don't need to enter credentials manually. The system will use your
-											existing AWS configuration. If you want to use different credentials, uncheck
-											"Use default credentials" below.
-										</p>
-									</div>
-								</div>
-							</div>
-						{:else if awsCredentialStatus.error}
-							<div
-								class="mb-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg p-4"
-							>
-								<div class="flex items-start">
-									<IconifyIcon
-										icon="material-symbols:warning"
-										class="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0"
-									/>
-									<div class="ml-3 flex-1">
-										<h4 class="text-sm font-semibold text-amber-900 dark:text-amber-100">
-											AWS Credentials Not Detected
-										</h4>
-										<p class="text-sm text-amber-700 dark:text-amber-300 mt-1">
-											Please provide AWS credentials below to connect to your AWS account.
-										</p>
-									</div>
-								</div>
-							</div>
-						{/if}
-					{:else if isAWSPlugin && loadingAwsStatus}
-						<div
-							class="mb-6 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
-						>
-							<div class="flex items-center">
-								<div
-									class="animate-spin rounded-full h-4 w-4 border-b-2 border-earthy-terracotta-700"
-								></div>
-								<span class="ml-3 text-sm text-gray-600 dark:text-gray-400"
-									>Checking for AWS credentials...</span
-								>
-							</div>
-						</div>
-					{/if}
 					{#snippet renderField(
 						field: ConfigField,
 						fieldPath: string,
@@ -1266,49 +1290,39 @@
 					{/snippet}
 
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						{#each configSpec.filter((f) => !['tags', 'external_links', 'filter'].includes(f.name)) as field}
+						{#each configSpec.filter((f) => {
+							// Filter out fields handled by dedicated UI sections
+							if (['tags', 'external_links', 'filter'].includes(f.name)) return false;
+							return true;
+						}) as field}
 							{#if !shouldHideField(field, config)}
 								{@render renderField(field, field.name, config, 0)}
 							{/if}
 						{/each}
 					</div>
 				</div>
-			{:else}
-				<div
-					class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-center py-12"
-				>
-					<IconifyIcon
-						icon="material-symbols:check-circle"
-						class="h-12 w-12 mx-auto text-green-600 mb-4"
-					/>
-					<h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-						No Configuration Needed
-					</h3>
-					<p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
-						This plugin doesn't require additional configuration
-					</p>
-				</div>
 			{/if}
 		{/if}
 
-		<!-- Step 4: Schedule Configuration -->
-		{#if currentStep === totalSteps}
-			<div
-				class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6"
-			>
-				<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
-					<IconifyIcon
-						icon="material-symbols:schedule"
-						class="h-5 w-5 mr-2 text-earthy-terracotta-600"
-					/>
-					Schedule & Filtering
-				</h3>
-				<div class="space-y-5">
-					<div>
-						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-							Cron Expression
-							<span class="text-xs font-normal text-gray-500 ml-1">(Optional)</span>
-						</label>
+	<!-- Step 4: Schedule & Filter -->
+	{#if currentStep === 4}
+		<div
+			class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6"
+		>
+			<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-6 flex items-center">
+				<IconifyIcon
+					icon="material-symbols:schedule"
+					class="h-5 w-5 mr-2 text-earthy-terracotta-600"
+				/>
+				Schedule & Filter
+			</h3>
+
+			<div class="space-y-5">
+				<div>
+					<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+						Cron Expression
+						<span class="text-xs font-normal text-gray-500 ml-1">(Optional)</span>
+					</label>
 						<input
 							type="text"
 							bind:value={cronExpression}

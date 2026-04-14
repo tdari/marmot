@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionaws "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -34,17 +35,15 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-credentials:
-  region: "us-east-1" 
-  id: "<aws-secret-id>"
-  secret: "<aws-secret-key>"
+discover_dlq: true
 tags:
-  - "sns"
+  - "sqs"
 `
 
 type Source struct {
-	config *Config
-	client *sqs.Client
+	config     *Config
+	connConfig *connectionaws.AWSConfig
+	client     *sqs.Client
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -68,12 +67,13 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	}
 	s.config = config
 
-	awsConfig, err := plugin.ExtractAWSConfig(pluginConfig)
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionaws.AWSConfig](pluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("extracting AWS config: %w", err)
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
+	s.connConfig = connConfig
 
-	awsCfg, err := awsConfig.NewAWSConfig(ctx)
+	awsCfg, err := s.connConfig.NewAWSConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating AWS config: %w", err)
 	}
@@ -266,12 +266,13 @@ func extractQueueNameFromArn(arn string) string {
 
 func init() {
 	meta := plugin.PluginMeta{
-		ID:          "sqs",
-		Name:        "AWS SQS",
-		Description: "Discover SQS queues from AWS accounts",
-		Icon:        "sqs",
-		Category:    "messaging",
-		ConfigSpec:  plugin.GenerateConfigSpec(Config{}),
+		ID:              "sqs",
+		Name:            "AWS SQS",
+		Description:     "Discover SQS queues from AWS accounts",
+		Icon:            "sqs",
+		Category:        "messaging",
+		ConfigSpec:      plugin.GenerateConfigSpec(Config{}),
+		ConnectionTypes: []string{"aws"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &Source{}); err != nil {

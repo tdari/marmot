@@ -56,10 +56,10 @@ AI enrichment is best-effort - failures are logged as warnings but do not preven
 
 ```yaml
 
-host: "trino.company.com"
-port: 8080
-user: "marmot_reader"
-secure: false
+catalog: "hive"
+include_catalogs: true
+include_columns: true
+include_stats: false
 exclude_catalogs:
   - "system"
   - "jmx"
@@ -74,26 +74,19 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| access_token | string | false | JWT bearer token |
-| ai_catalog | string | false | Name of the AI connector catalog (empty = disabled) |
-| ai_classify_labels | []string | false | Custom classification labels |
-| ai_classify_tables | bool | false | Auto-classify tables into categories |
-| ai_generate_descriptions | bool | false | Auto-generate descriptions for undocumented tables |
-| ai_max_enrichments | int | false | Max tables to enrich with AI (0 = unlimited) |
+| AI Catalog | string | false | Name of the AI connector catalog (empty = disabled) |
+| AI Classify Labels | []string | false | Custom classification labels |
+| AI Classify Tables | bool | false | Auto-classify tables into categories |
+| AI Generate Descriptions | bool | false | Auto-generate descriptions for undocumented tables |
+| AI Max Enrichments | int | false | Max tables to enrich with AI (0 = unlimited) |
 | catalog | string | false | Specific catalog to discover (all if empty) |
 | exclude_catalogs | []string | false | Catalogs to skip |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | Trino coordinator hostname |
 | include_catalogs | bool | false | Create catalog-level assets |
 | include_columns | bool | false | Include column info in table metadata |
 | include_stats | bool | false | Collect table statistics (can be slow) |
-| password | string | false | Password (requires HTTPS) |
-| port | int | false | Trino coordinator port |
-| secure | bool | false | Use HTTPS |
-| ssl_cert_path | string | false | Path to TLS certificate file |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| user | string | false | Username for authentication |
 
 ## Available Metadata
 

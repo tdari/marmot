@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/trino"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -51,12 +52,12 @@ var internalConnectors = map[string]bool{
 // Connectors absent from this map (and not internal) use a default mapping.
 var connectorMap = map[string]connectorInfo{
 	// Relational databases
-	"postgresql": {Provider: "PostgreSQL", MRNName: func(_, _, table string) string { return table }},
-	"mysql":      {Provider: "MySQL", MRNName: func(_, _, table string) string { return table }},
-	"mariadb":    {Provider: "MariaDB", MRNName: func(_, _, table string) string { return table }},
-	"sqlserver":  {Provider: "SQL Server", MRNName: func(_, schema, table string) string { return schema + "." + table }},
-	"oracle":     {Provider: "Oracle", MRNName: func(_, schema, table string) string { return schema + "." + table }},
-	"clickhouse": {Provider: "ClickHouse", MRNName: func(_, schema, table string) string { return schema + "." + table }},
+	"postgresql":  {Provider: "PostgreSQL", MRNName: func(_, _, table string) string { return table }},
+	"mysql":       {Provider: "MySQL", MRNName: func(_, _, table string) string { return table }},
+	"mariadb":     {Provider: "MariaDB", MRNName: func(_, _, table string) string { return table }},
+	"sqlserver":   {Provider: "SQL Server", MRNName: func(_, schema, table string) string { return schema + "." + table }},
+	"oracle":      {Provider: "Oracle", MRNName: func(_, schema, table string) string { return schema + "." + table }},
+	"clickhouse":  {Provider: "ClickHouse", MRNName: func(_, schema, table string) string { return schema + "." + table }},
 	"singlestore": {Provider: "SingleStore", MRNName: func(_, _, table string) string { return table }},
 	"redshift":    {Provider: "Redshift", MRNName: func(_, schema, table string) string { return schema + "." + table }},
 
@@ -69,10 +70,10 @@ var connectorMap = map[string]connectorInfo{
 	"hudi":       {Provider: "Hudi", MRNName: defaultMRNName},
 
 	// NoSQL / document / key-value
-	"mongodb":       {Provider: "MongoDB", MRNName: func(_, _, table string) string { return table }},
-	"cassandra":     {Provider: "Cassandra", MRNName: func(_, schema, table string) string { return schema + "." + table }},
-	"redis":         {Provider: "Redis", MRNName: func(_, _, table string) string { return table }},
-	"accumulo":      {Provider: "Accumulo", MRNName: func(_, schema, table string) string { return schema + "." + table }},
+	"mongodb":   {Provider: "MongoDB", MRNName: func(_, _, table string) string { return table }},
+	"cassandra": {Provider: "Cassandra", MRNName: func(_, schema, table string) string { return schema + "." + table }},
+	"redis":     {Provider: "Redis", MRNName: func(_, _, table string) string { return table }},
+	"accumulo":  {Provider: "Accumulo", MRNName: func(_, schema, table string) string { return schema + "." + table }},
 
 	// Search / analytics engines
 	"elasticsearch": {Provider: "Elasticsearch", MRNName: func(_, _, table string) string { return table }},
@@ -113,15 +114,6 @@ func connectorInfoForName(connector string) (connectorInfo, bool) {
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	// Connection
-	Host        string `json:"host" validate:"required" description:"Trino coordinator hostname"`
-	Port        int    `json:"port" default:"8080" validate:"omitempty,min=1,max=65535" description:"Trino coordinator port"`
-	User        string `json:"user" validate:"required" description:"Username for authentication"`
-	Password    string `json:"password,omitempty" sensitive:"true" description:"Password (requires HTTPS)"`
-	Secure      bool   `json:"secure,omitempty" default:"false" description:"Use HTTPS"`
-	SSLCertPath string `json:"ssl_cert_path,omitempty" label:"SSL Cert Path" description:"Path to TLS certificate file"`
-	AccessToken string `json:"access_token,omitempty" sensitive:"true" description:"JWT bearer token"`
-
 	// Scope
 	Catalog         string   `json:"catalog,omitempty" description:"Specific catalog to discover (all if empty)"`
 	ExcludeCatalogs []string `json:"exclude_catalogs,omitempty" default:"[\"system\",\"jmx\"]" description:"Catalogs to skip"`
@@ -142,10 +134,10 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "trino.company.com"
-port: 8080
-user: "marmot_reader"
-secure: false
+catalog: "hive"
+include_catalogs: true
+include_columns: true
+include_stats: false
 exclude_catalogs:
   - "system"
   - "jmx"
@@ -157,6 +149,7 @@ tags:
 // Source represents the Trino plugin
 type Source struct {
 	config            *Config
+	connConfig        *trino.TrinoConfig
 	db                *sql.DB
 	catalogConnectors map[string]string // catalog name → connector name
 }
@@ -167,8 +160,9 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if config.Port == 0 {
-		config.Port = 8080
+	connConfig, err := plugin.UnmarshalPluginConfig[trino.TrinoConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
 
 	if config.ExcludeCatalogs == nil {
@@ -183,7 +177,6 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		config.IncludeColumns = true
 	}
 
-
 	if config.AIClassifyLabels == nil && config.AIClassifyTables {
 		config.AIClassifyLabels = []string{"analytics", "operational", "pii", "financial", "logs", "reference"}
 	}
@@ -193,6 +186,7 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 	}
 
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -285,21 +279,21 @@ func (s *Source) initConnection(ctx context.Context) error {
 	defer cancel()
 
 	scheme := "http"
-	if s.config.Secure {
+	if s.connConfig.Secure {
 		scheme = "https"
 	}
 
-	dsn := fmt.Sprintf("%s://%s@%s:%d", scheme, s.config.User, s.config.Host, s.config.Port)
+	dsn := fmt.Sprintf("%s://%s@%s:%d", scheme, s.connConfig.User, s.connConfig.Host, s.connConfig.Port)
 
 	params := []string{}
-	if s.config.SSLCertPath != "" {
-		params = append(params, "SSLCertPath="+s.config.SSLCertPath)
+	if s.connConfig.SSLCertPath != "" {
+		params = append(params, "SSLCertPath="+s.connConfig.SSLCertPath)
 	}
-	if s.config.AccessToken != "" {
-		params = append(params, "accessToken="+s.config.AccessToken)
+	if s.connConfig.AccessToken != "" {
+		params = append(params, "accessToken="+s.connConfig.AccessToken)
 	}
-	if s.config.Password != "" {
-		params = append(params, "custom_auth="+s.config.User+":"+s.config.Password)
+	if s.connConfig.Password != "" {
+		params = append(params, "custom_auth="+s.connConfig.User+":"+s.connConfig.Password)
 	}
 	if len(params) > 0 {
 		dsn += "?" + strings.Join(params, "&")
@@ -321,8 +315,8 @@ func (s *Source) initConnection(ctx context.Context) error {
 	}
 
 	log.Debug().
-		Str("host", s.config.Host).
-		Int("port", s.config.Port).
+		Str("host", s.connConfig.Host).
+		Int("port", s.connConfig.Port).
 		Msg("Successfully connected to Trino")
 
 	s.db = db
@@ -791,9 +785,9 @@ func (s *Source) aiClassifyTable(ctx context.Context, table, columnSummary strin
 
 func (s *Source) createCatalogAsset(catalogName string) asset.Asset {
 	metadata := map[string]interface{}{
-		"host":         s.config.Host,
-		"port":         s.config.Port,
 		"catalog_name": catalogName,
+		"host":         s.connConfig.Host,
+		"port":         s.connConfig.Port,
 	}
 
 	mrnValue := mrn.New("Catalog", "Trino", catalogName)
@@ -801,12 +795,12 @@ func (s *Source) createCatalogAsset(catalogName string) asset.Asset {
 	processedTags := plugin.InterpolateTags(s.config.Tags, metadata)
 
 	return asset.Asset{
-		Name:        &catalogName,
-		MRN:         &mrnValue,
-		Type:        "Catalog",
-		Providers:   []string{"Trino"},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Name:      &catalogName,
+		MRN:       &mrnValue,
+		Type:      "Catalog",
+		Providers: []string{"Trino"},
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "Trino",
 			LastSyncAt: time.Now(),
@@ -848,12 +842,12 @@ func (s *Source) attachDDL(ctx context.Context, catalog, schema string, assets [
 
 func (s *Source) createTableAsset(catalog, schema, tableName, tableType string, info connectorInfo) asset.Asset {
 	metadata := map[string]interface{}{
-		"host":       s.config.Host,
-		"port":       s.config.Port,
 		"catalog":    catalog,
 		"schema":     schema,
 		"table_name": tableName,
 		"table_type": tableType,
+		"host":       s.connConfig.Host,
+		"port":       s.connConfig.Port,
 	}
 
 	assetType := "Table"
@@ -867,12 +861,12 @@ func (s *Source) createTableAsset(catalog, schema, tableName, tableType string, 
 	processedTags := plugin.InterpolateTags(s.config.Tags, metadata)
 
 	return asset.Asset{
-		Name:        &name,
-		MRN:         &mrnValue,
-		Type:        assetType,
-		Providers:   []string{info.Provider},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Name:      &name,
+		MRN:       &mrnValue,
+		Type:      assetType,
+		Providers: []string{info.Provider},
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "Trino",
 			LastSyncAt: time.Now(),

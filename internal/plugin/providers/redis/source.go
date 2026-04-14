@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionredis "github.com/marmotdata/marmot/internal/core/connection/providers/redis"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -22,31 +23,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Config for Redis plugin
+// Config for Redis plugin (discovery/pipeline fields only).
+// Connection fields (host, port, password, username, db, tls, tls_insecure) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	// Connection options
-	Host     string `json:"host" description:"Redis server hostname or IP address" validate:"required"`
-	Port     int    `json:"port,omitempty" description:"Redis server port" default:"6379" validate:"omitempty,min=1,max=65535"`
-	Password string `json:"password,omitempty" description:"Password for authentication" sensitive:"true"`
-	Username string `json:"username,omitempty" description:"Username for ACL authentication"`
-	DB          int    `json:"db,omitempty" description:"Default database number" default:"0" validate:"omitempty,min=0,max=15"`
-	TLS         bool   `json:"tls,omitempty" description:"Enable TLS connection"`
-	TLSInsecure bool   `json:"tls_insecure,omitempty" label:"TLS Insecure" description:"Skip TLS certificate verification"`
-
 	// Discovery options
 	DiscoverAllDatabases bool `json:"discover_all_databases" description:"Discover all databases with keys (db0-db15)" default:"true"`
-
 }
 
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "localhost"
-port: 6379
-password: "secret"
 discover_all_databases: true
 filter:
   include:
@@ -57,17 +47,15 @@ tags:
 `
 
 type Source struct {
-	config *Config
+	config     *Config
+	connConfig *connectionredis.RedisConfig
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
+	// Validate plugin-specific config only
 	config, err := plugin.UnmarshalPluginConfig[Config](rawConfig)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
-	}
-
-	if config.Port == 0 {
-		config.Port = 6379
 	}
 
 	// Default discover_all_databases to true unless explicitly set to false
@@ -84,17 +72,13 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 }
 
 func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConfig) (*plugin.DiscoveryResult, error) {
-	config, err := plugin.UnmarshalPluginConfig[Config](pluginConfig)
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionredis.RedisConfig](pluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshaling config: %w", err)
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
-	s.config = config
+	s.connConfig = connConfig
 
-	if s.config.Port == 0 {
-		s.config.Port = 6379
-	}
-
-	client, err := s.createClient()
+	client, err := createClient(s.connConfig)
 	if err != nil {
 		return nil, fmt.Errorf("creating Redis client: %w", err)
 	}
@@ -120,8 +104,8 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	var assets []asset.Asset
 	var lineages []lineage.LineageEdge
 
-	host := s.config.Host
-	port := s.config.Port
+	host := s.connConfig.Host
+	port := s.connConfig.Port
 
 	if s.config.DiscoverAllDatabases {
 		// Discover databases from keyspace info
@@ -136,7 +120,7 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 		}
 	} else {
 		// Only discover the configured database
-		dbName := fmt.Sprintf("db%d", s.config.DB)
+		dbName := fmt.Sprintf("db%d", s.connConfig.DB)
 		dbStats, exists := keyspaceInfo[dbName]
 		keyspace := make(map[string]string)
 		if exists {
@@ -152,17 +136,17 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	}, nil
 }
 
-func (s *Source) createClient() (*redis.Client, error) {
+func createClient(connConfig *connectionredis.RedisConfig) (*redis.Client, error) {
 	opts := &redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", s.config.Host, s.config.Port),
-		Password: s.config.Password,
-		Username: s.config.Username,
-		DB:       s.config.DB,
+		Addr:     fmt.Sprintf("%s:%d", connConfig.Host, connConfig.Port),
+		Password: connConfig.Password,
+		Username: connConfig.Username,
+		DB:       connConfig.DB,
 	}
 
-	if s.config.TLS {
+	if connConfig.TLS {
 		opts.TLSConfig = &tls.Config{
-			InsecureSkipVerify: s.config.TLSInsecure, //nolint:gosec // G402: user-controlled TLS config
+			InsecureSkipVerify: connConfig.TLSInsecure, //nolint:gosec // G402: user-controlled TLS config
 		}
 	}
 
@@ -264,8 +248,8 @@ func (s *Source) createDatabaseAsset(host string, port int, dbName string, keysp
 		MRN:       &mrnValue,
 		Type:      "Database",
 		Providers: []string{"Redis"},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "Redis",
 			LastSyncAt: time.Now(),

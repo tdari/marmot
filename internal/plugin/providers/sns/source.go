@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionaws "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
@@ -30,17 +31,14 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-credentials:
-  region: "us-east-1"
-  profile: "production"
-  role: "<role>"
 tags:
   - "aws"
 `
 
 type Source struct {
-	config *Config
-	client *sns.Client
+	config     *Config
+	connConfig *connectionaws.AWSConfig
+	client     *sns.Client
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -64,12 +62,13 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	}
 	s.config = config
 
-	awsConfig, err := plugin.ExtractAWSConfig(pluginConfig)
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionaws.AWSConfig](pluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("extracting AWS config: %w", err)
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
+	s.connConfig = connConfig
 
-	awsCfg, err := awsConfig.NewAWSConfig(ctx)
+	awsCfg, err := s.connConfig.NewAWSConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating AWS config: %w", err)
 	}
@@ -178,12 +177,13 @@ func extractTopicName(arn string) string {
 
 func init() {
 	meta := plugin.PluginMeta{
-		ID:          "sns",
-		Name:        "AWS SNS",
-		Description: "Discover SNS topics from AWS accounts",
-		Icon:        "sns",
-		Category:    "messaging",
-		ConfigSpec:  plugin.GenerateConfigSpec(Config{}),
+		ID:              "sns",
+		Name:            "AWS SNS",
+		Description:     "Discover SNS topics from AWS accounts",
+		Icon:            "sns",
+		Category:        "messaging",
+		ConfigSpec:      plugin.GenerateConfigSpec(Config{}),
+		ConnectionTypes: []string{"aws"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &Source{}); err != nil {

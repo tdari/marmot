@@ -13,22 +13,22 @@ import (
 )
 
 func (s *Source) configureAuthentication() ([]kgo.Opt, error) {
-	if s.config.Authentication == nil {
+	if s.connConfig.Authentication == nil {
 		return nil, nil
 	}
 
-	authType := s.config.Authentication.Type
+	authType := s.connConfig.Authentication.Type
 	if authType == "none" || authType == "" {
 		return nil, nil
 	}
 
 	if isSASLType(authType) {
-		if err := validateSASLConfig(s.config.Authentication); err != nil {
+		if err := validateSASLConfig(s.connConfig.Authentication); err != nil {
 			return nil, err
 		}
 	}
 
-	mechanism, err := createSASLMechanism(s.config.Authentication)
+	mechanism, err := createSASLMechanism(s.connConfig.Authentication)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func createSASLMechanism(auth *AuthConfig) (sasl.Mechanism, error) {
 }
 
 func (s *Source) configureTLS() (*kgo.Opt, error) {
-	if s.config.TLS == nil || !s.config.TLS.Enabled {
+	if s.connConfig.TLS == nil || !s.connConfig.TLS.Enabled {
 		return nil, nil
 	}
 
@@ -93,10 +93,10 @@ func (s *Source) configureTLS() (*kgo.Opt, error) {
 		MinVersion: tls.VersionTLS12,
 	}
 
-	tlsConfig.InsecureSkipVerify = s.config.TLS.SkipVerify
+	tlsConfig.InsecureSkipVerify = s.connConfig.TLS.SkipVerify
 
-	if s.config.TLS.CACertPath != "" {
-		caCert, err := os.ReadFile(s.config.TLS.CACertPath)
+	if s.connConfig.TLS.CACertPath != "" {
+		caCert, err := os.ReadFile(s.connConfig.TLS.CACertPath)
 		if err != nil {
 			return nil, fmt.Errorf("reading CA cert file: %w", err)
 		}
@@ -108,10 +108,10 @@ func (s *Source) configureTLS() (*kgo.Opt, error) {
 		tlsConfig.RootCAs = certPool
 	}
 
-	if s.config.TLS.CertPath != "" && s.config.TLS.KeyPath != "" {
+	if s.connConfig.TLS.CertPath != "" && s.connConfig.TLS.KeyPath != "" {
 		cert, err := tls.LoadX509KeyPair(
-			s.config.TLS.CertPath,
-			s.config.TLS.KeyPath,
+			s.connConfig.TLS.CertPath,
+			s.connConfig.TLS.KeyPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("loading client cert/key: %w", err)

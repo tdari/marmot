@@ -16,19 +16,19 @@ import (
 
 func (s *Source) initClient(ctx context.Context) error {
 	opts := []kgo.Opt{
-		kgo.SeedBrokers(strings.Split(s.config.BootstrapServers, ",")...),
+		kgo.SeedBrokers(strings.Split(s.connConfig.BootstrapServers, ",")...),
 	}
 
-	if s.config.ClientID != "" {
-		opts = append(opts, kgo.ClientID(s.config.ClientID))
+	if s.connConfig.ClientID != "" {
+		opts = append(opts, kgo.ClientID(s.connConfig.ClientID))
 	}
 
-	if s.config.ClientTimeout > 0 {
-		timeout := time.Duration(s.config.ClientTimeout) * time.Second
+	if s.connConfig.ClientTimeout > 0 {
+		timeout := time.Duration(s.connConfig.ClientTimeout) * time.Second
 		opts = append(opts, kgo.RequestTimeoutOverhead(timeout))
 	}
 
-	if s.config.Authentication != nil {
+	if s.connConfig.Authentication != nil {
 		authOpts, err := s.configureAuthentication()
 		if err != nil {
 			return fmt.Errorf("configuring authentication: %w", err)
@@ -37,7 +37,7 @@ func (s *Source) initClient(ctx context.Context) error {
 	}
 
 	// Configure TLS if enabled (even without authentication)
-	if s.config.TLS != nil && s.config.TLS.Enabled {
+	if s.connConfig.TLS != nil && s.connConfig.TLS.Enabled {
 		if tlsOpt, err := s.configureTLS(); err != nil {
 			return fmt.Errorf("configuring TLS: %w", err)
 		} else if tlsOpt != nil {
@@ -74,14 +74,14 @@ func (s *Source) initClient(ctx context.Context) error {
 }
 
 func (s *Source) initSchemaRegistry() error {
-	if s.config.SchemaRegistry.URL == "" {
+	if s.connConfig.SchemaRegistry.URL == "" {
 		return fmt.Errorf("schema registry URL is required")
 	}
 
-	conf := schemaregistry.NewConfig(s.config.SchemaRegistry.URL)
+	conf := schemaregistry.NewConfig(s.connConfig.SchemaRegistry.URL)
 
 	// Create custom HTTP client with TLS configuration if URL uses HTTPS
-	if s.config.SchemaRegistry.SkipVerify && (len(s.config.SchemaRegistry.URL) > 5 && s.config.SchemaRegistry.URL[:5] == "https") {
+	if s.connConfig.SchemaRegistry.SkipVerify && (len(s.connConfig.SchemaRegistry.URL) > 5 && s.connConfig.SchemaRegistry.URL[:5] == "https") {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true, //nolint:gosec // G402: user opted into skipping schema registry TLS verification
 		}
@@ -96,17 +96,17 @@ func (s *Source) initSchemaRegistry() error {
 		}
 	}
 
-	if userInfo, ok := s.config.SchemaRegistry.Config["basic.auth.user.info"]; ok {
+	if userInfo, ok := s.connConfig.SchemaRegistry.Config["basic.auth.user.info"]; ok {
 		conf.BasicAuthUserInfo = userInfo
 	}
 
-	if timeout, ok := s.config.SchemaRegistry.Config["request.timeout.ms"]; ok {
+	if timeout, ok := s.connConfig.SchemaRegistry.Config["request.timeout.ms"]; ok {
 		if val, err := strconv.Atoi(timeout); err == nil {
 			conf.RequestTimeoutMs = val
 		}
 	}
 
-	if cacheCapacity, ok := s.config.SchemaRegistry.Config["cache.capacity"]; ok {
+	if cacheCapacity, ok := s.connConfig.SchemaRegistry.Config["cache.capacity"]; ok {
 		if val, err := strconv.Atoi(cacheCapacity); err == nil {
 			conf.CacheCapacity = val
 		}

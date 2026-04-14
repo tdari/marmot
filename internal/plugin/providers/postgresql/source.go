@@ -16,23 +16,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/postgresql"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for PostgreSQL plugin
+// Config for PostgreSQL plugin (discovery/pipeline fields only).
+// Connection fields (host, port, user, password, ssl_mode) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-
-	// Connection configuration
-	Host     string `json:"host" description:"PostgreSQL server hostname or IP address" validate:"required"`
-	Port     int    `json:"port" description:"PostgreSQL server port" default:"5432" validate:"omitempty,min=1,max=65535"`
-	User     string `json:"user" description:"Username for authentication" validate:"required"`
-	Password string `json:"password" description:"Password for authentication" sensitive:"true"`
-	SSLMode  string `json:"ssl_mode" label:"SSL Mode" description:"SSL mode (disable, require, verify-ca, verify-full)" default:"disable" validate:"omitempty,oneof=disable require verify-ca verify-full"`
 
 	// Discovery configuration
 	IncludeDatabases     bool `json:"include_databases" description:"Whether to discover databases" default:"true"`
@@ -45,11 +41,11 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "prod-postgres.company.com"
-port: 5432
-user: "marmot_reader"
-password: "secure_password_123"
-ssl_mode: "require"
+include_databases: true
+include_columns: true
+enable_metrics: true
+discover_foreign_keys: true
+exclude_system_schemas: true
 tags:
   - "postgres"
   - "production"
@@ -57,8 +53,9 @@ tags:
 
 // Source represents the PostgreSQL plugin
 type Source struct {
-	config *Config
-	pool   *pgxpool.Pool
+	config     *Config
+	connConfig *postgresql.PostgreSQLConfig
+	pool       *pgxpool.Pool
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -67,12 +64,9 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if config.Port == 0 {
-		config.Port = 5432
-	}
-
-	if config.SSLMode == "" {
-		config.SSLMode = "disable"
+	connConfig, err := plugin.UnmarshalPluginConfig[postgresql.PostgreSQLConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
 
 	if err := plugin.ValidateStruct(config); err != nil {
@@ -80,6 +74,7 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 	}
 
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -173,12 +168,12 @@ func (s *Source) initConnection(ctx context.Context, database string) error {
 
 	connStr := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		s.config.User,
-		s.config.Password,
-		s.config.Host,
-		s.config.Port,
+		s.connConfig.User,
+		s.connConfig.Password,
+		s.connConfig.Host,
+		s.connConfig.Port,
 		database,
-		s.config.SSLMode,
+		s.connConfig.SSLMode,
 	)
 
 	config, err := pgxpool.ParseConfig(connStr)
@@ -205,8 +200,8 @@ func (s *Source) initConnection(ctx context.Context, database string) error {
 	}
 
 	log.Debug().
-		Str("host", s.config.Host).
-		Int("port", s.config.Port).
+		Str("host", s.connConfig.Host).
+		Int("port", s.connConfig.Port).
 		Str("database", database).
 		Msg("Successfully connected to PostgreSQL")
 
@@ -223,8 +218,8 @@ func (s *Source) closeConnection() {
 
 func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 	log.Debug().
-		Str("host", s.config.Host).
-		Int("port", s.config.Port).
+		Str("host", s.connConfig.Host).
+		Int("port", s.connConfig.Port).
 		Msg("Discovering databases")
 
 	query := `
@@ -287,8 +282,8 @@ func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 			Msg("Found database")
 
 		metadata := make(map[string]interface{})
-		metadata["host"] = s.config.Host
-		metadata["port"] = s.config.Port
+		metadata["host"] = s.connConfig.Host
+		metadata["port"] = s.connConfig.Port
 		metadata["database"] = name
 		metadata["owner"] = owner
 		metadata["size"] = size
@@ -313,8 +308,8 @@ func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 			MRN:       &mrnValue,
 			Type:      "Database",
 			Providers: []string{"PostgreSQL"},
-			Metadata:    metadata,
-			Tags:        processedTags,
+			Metadata:  metadata,
+			Tags:      processedTags,
 			Sources: []asset.AssetSource{{
 				Name:       "PostgreSQL",
 				LastSyncAt: time.Now(),
@@ -401,8 +396,8 @@ func (s *Source) discoverTablesAndViews(ctx context.Context, dbName string) ([]a
 			Msg("Found database object")
 
 		metadata := make(map[string]interface{})
-		metadata["host"] = s.config.Host
-		metadata["port"] = s.config.Port
+		metadata["host"] = s.connConfig.Host
+		metadata["port"] = s.connConfig.Port
 		metadata["database"] = dbName
 		metadata["schema"] = schemaName
 		metadata["table_name"] = objectName

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/mongodb"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -20,39 +21,34 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Config for MongoDB plugin
+// Config for MongoDB plugin (discovery/pipeline fields only).
+// Connection fields (connection_uri, host, port, user, password, auth_source, tls, tls_insecure)
+// are provided via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	ConnectionURI string `json:"connection_uri" label:"Connection URI" description:"MongoDB connection URI (overrides host/port/user/password)" validate:"omitempty,uri"`
-	Host          string `json:"host" description:"MongoDB server hostname or IP address" validate:"required_without=ConnectionURI"`
-	Port          int    `json:"port" description:"MongoDB server port" default:"27017" validate:"omitempty,min=1,max=65535"`
-	User          string `json:"user" description:"Username for authentication"`
-	Password      string `json:"password" description:"Password for authentication" sensitive:"true"`
-	AuthSource    string `json:"auth_source" description:"Authentication database name" default:"admin"`
-	TLS           bool   `json:"tls" description:"Enable TLS/SSL for connection" default:"false"`
-	TLSInsecure   bool   `json:"tls_insecure" label:"TLS Insecure" description:"Skip verification of server certificate" default:"false"`
-
-	IncludeDatabases   bool           `json:"include_databases" description:"Whether to discover databases" default:"true"`
-	IncludeCollections bool           `json:"include_collections" description:"Whether to discover collections" default:"true"`
-	IncludeViews       bool           `json:"include_views" description:"Whether to include views" default:"true"`
-	IncludeIndexes     bool           `json:"include_indexes" description:"Whether to include index information" default:"true"`
-	SampleSchema       bool           `json:"sample_schema" description:"Sample documents to infer schema" default:"true"`
-	SampleSize         int            `json:"sample_size" description:"Number of documents to sample (-1 for entire collection)" default:"1000" validate:"omitempty,min=-1"`
-	UseRandomSampling  bool           `json:"use_random_sampling" description:"Use random sampling for schema inference" default:"true"`
-	ExcludeSystemDbs bool `json:"exclude_system_dbs" description:"Whether to exclude system databases (admin, config, local)" default:"true"`
+	IncludeDatabases   bool `json:"include_databases" description:"Whether to discover databases" default:"true"`
+	IncludeCollections bool `json:"include_collections" description:"Whether to discover collections" default:"true"`
+	IncludeViews       bool `json:"include_views" description:"Whether to include views" default:"true"`
+	IncludeIndexes     bool `json:"include_indexes" description:"Whether to include index information" default:"true"`
+	SampleSchema       bool `json:"sample_schema" description:"Sample documents to infer schema" default:"true"`
+	SampleSize         int  `json:"sample_size" description:"Number of documents to sample (-1 for entire collection)" default:"1000" validate:"omitempty,min=-1"`
+	UseRandomSampling  bool `json:"use_random_sampling" description:"Use random sampling for schema inference" default:"true"`
+	ExcludeSystemDbs   bool `json:"exclude_system_dbs" description:"Whether to exclude system databases (admin, config, local)" default:"true"`
 }
 
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "mongo-cluster.company.com"
-port: 27017
-user: "analytics_reader"
-password: "mongo_pass_456"
-auth_source: "admin"
-tls: true
+include_databases: true
+include_collections: true
+include_views: true
+include_indexes: true
+sample_schema: true
+sample_size: 1000
+use_random_sampling: true
+exclude_system_dbs: true
 tags:
   - "mongodb"
   - "analytics"
@@ -60,6 +56,7 @@ tags:
 
 type Source struct {
 	config     *Config
+	connConfig *mongodb.MongoDBConfig
 	client     *mongo.Client
 	timeout    time.Duration
 	sampleSize int32
@@ -71,19 +68,8 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if config.Port == 0 {
-		config.Port = 27017
-	}
-	if config.AuthSource == "" {
-		config.AuthSource = "admin"
-	}
-
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
-	}
-
-	if config.ConnectionURI == "" && config.Host == "" {
-		return nil, fmt.Errorf("either host or connection_uri is required")
 	}
 
 	switch {
@@ -95,7 +81,13 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		s.sampleSize = int32(config.SampleSize) //nolint:gosec // G115: bounds checked above
 	}
 
+	connConfig, err := plugin.UnmarshalPluginConfig[mongodb.MongoDBConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+
 	s.config = config
+	s.connConfig = connConfig
 	s.timeout = 2 * time.Minute
 	return rawConfig, nil
 }

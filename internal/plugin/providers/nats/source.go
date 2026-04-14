@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionnats "github.com/marmotdata/marmot/internal/core/connection/providers/nats"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/nats-io/nats.go"
@@ -21,29 +22,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Config for NATS plugin
+// Config for NATS plugin (discovery/pipeline fields only).
+// Connection fields (host, port, token, username, password, credentials_file, tls, tls_insecure)
+// are provided via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-
-	// Connection options
-	Host            string `json:"host" description:"NATS server hostname or IP address" validate:"required"`
-	Port            int    `json:"port,omitempty" description:"NATS server port" default:"4222" validate:"omitempty,min=1,max=65535"`
-	Token           string `json:"token,omitempty" description:"Authentication token" sensitive:"true"`
-	Username        string `json:"username,omitempty" description:"Username for authentication"`
-	Password        string `json:"password,omitempty" description:"Password for authentication" sensitive:"true"`
-	CredentialsFile string `json:"credentials_file,omitempty" description:"Path to NATS credentials file (.creds)"`
-	TLS             bool   `json:"tls,omitempty" description:"Enable TLS connection"`
-	TLSInsecure     bool   `json:"tls_insecure,omitempty" label:"TLS Insecure" description:"Skip TLS certificate verification"`
-
 }
 
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "localhost"
-port: 4222
-token: "s3cr3t"
 filter:
   include:
     - "^ORDERS"
@@ -53,17 +42,14 @@ tags:
 `
 
 type Source struct {
-	config *Config
+	config     *Config
+	connConfig *connectionnats.NatsConfig
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
 	config, err := plugin.UnmarshalPluginConfig[Config](rawConfig)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
-	}
-
-	if config.Port == 0 {
-		config.Port = 4222
 	}
 
 	if err := plugin.ValidateStruct(config); err != nil {
@@ -74,7 +60,14 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 	return rawConfig, nil
 }
 
-func (s *Source) Discover(ctx context.Context, _ plugin.RawPluginConfig) (*plugin.DiscoveryResult, error) {
+func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConfig) (*plugin.DiscoveryResult, error) {
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionnats.NatsConfig](pluginConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+
+	s.connConfig = connConfig
+
 	nc, err := s.connect()
 	if err != nil {
 		return nil, fmt.Errorf("connecting to NATS: %w", err)
@@ -103,28 +96,28 @@ func (s *Source) Discover(ctx context.Context, _ plugin.RawPluginConfig) (*plugi
 }
 
 func (s *Source) connect() (*nats.Conn, error) {
-	addr := fmt.Sprintf("nats://%s:%d", s.config.Host, s.config.Port)
+	addr := fmt.Sprintf("nats://%s:%d", s.connConfig.Host, s.connConfig.Port)
 
 	opts := []nats.Option{
 		nats.Timeout(10 * time.Second),
 		nats.Name("marmot-discovery"),
 	}
 
-	if s.config.Token != "" {
-		opts = append(opts, nats.Token(s.config.Token))
+	if s.connConfig.Token != "" {
+		opts = append(opts, nats.Token(s.connConfig.Token))
 	}
 
-	if s.config.Username != "" && s.config.Password != "" {
-		opts = append(opts, nats.UserInfo(s.config.Username, s.config.Password))
+	if s.connConfig.Username != "" && s.connConfig.Password != "" {
+		opts = append(opts, nats.UserInfo(s.connConfig.Username, s.connConfig.Password))
 	}
 
-	if s.config.CredentialsFile != "" {
-		opts = append(opts, nats.UserCredentials(s.config.CredentialsFile))
+	if s.connConfig.CredentialsFile != "" {
+		opts = append(opts, nats.UserCredentials(s.connConfig.CredentialsFile))
 	}
 
-	if s.config.TLS {
+	if s.connConfig.TLS {
 		opts = append(opts, nats.Secure(&tls.Config{
-			InsecureSkipVerify: s.config.TLSInsecure, //nolint:gosec // G402: user-controlled TLS config
+			InsecureSkipVerify: s.connConfig.TLSInsecure, //nolint:gosec // G402: user-controlled TLS config
 		}))
 	}
 
@@ -152,8 +145,8 @@ func (s *Source) createStreamAsset(info *jetstream.StreamInfo) asset.Asset {
 	metadata["first_seq"] = info.State.FirstSeq
 	metadata["last_seq"] = info.State.LastSeq
 
-	metadata["host"] = s.config.Host
-	metadata["port"] = s.config.Port
+	metadata["host"] = s.connConfig.Host
+	metadata["port"] = s.connConfig.Port
 
 	streamName := info.Config.Name
 	mrnValue := mrn.New("Stream", "NATS", streamName)
@@ -165,8 +158,8 @@ func (s *Source) createStreamAsset(info *jetstream.StreamInfo) asset.Asset {
 		MRN:       &mrnValue,
 		Type:      "Stream",
 		Providers: []string{"NATS"},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "NATS",
 			LastSyncAt: time.Now(),

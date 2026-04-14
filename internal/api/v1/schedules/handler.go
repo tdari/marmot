@@ -2,12 +2,14 @@ package schedules
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/marmotdata/marmot/internal/api/v1/common"
 	"github.com/marmotdata/marmot/internal/config"
 	"github.com/marmotdata/marmot/internal/core/auth"
+	"github.com/marmotdata/marmot/internal/core/connection"
 	"github.com/marmotdata/marmot/internal/core/runs"
 	"github.com/marmotdata/marmot/internal/core/user"
 	"github.com/marmotdata/marmot/internal/crypto"
@@ -216,9 +218,10 @@ func (h *Handler) validateConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type CreateScheduleRequest struct{
+type CreateScheduleRequest struct {
 	Name           string                 `json:"name"`
 	PluginID       string                 `json:"plugin_id"`
+	ConnectionID   string                 `json:"connection_id"`
 	Config         map[string]interface{} `json:"config"`
 	CronExpression string                 `json:"cron_expression"`
 	Enabled        bool                   `json:"enabled"`
@@ -227,6 +230,7 @@ type CreateScheduleRequest struct{
 type UpdateScheduleRequest struct {
 	Name           string                 `json:"name"`
 	PluginID       string                 `json:"plugin_id"`
+	ConnectionID   *string                `json:"connection_id,omitempty"`
 	Config         map[string]interface{} `json:"config"`
 	CronExpression string                 `json:"cron_expression"`
 	Enabled        bool                   `json:"enabled"`
@@ -234,16 +238,16 @@ type UpdateScheduleRequest struct {
 
 type ListSchedulesResponse struct {
 	Schedules []*runs.Schedule `json:"schedules"`
-	Total     int                   `json:"total"`
-	Limit     int                   `json:"limit"`
-	Offset    int                   `json:"offset"`
+	Total     int              `json:"total"`
+	Limit     int              `json:"limit"`
+	Offset    int              `json:"offset"`
 }
 
 type ListJobRunsResponse struct {
 	Runs   []*runs.JobRun `json:"runs"`
-	Total  int                 `json:"total"`
-	Limit  int                 `json:"limit"`
-	Offset int                 `json:"offset"`
+	Total  int            `json:"total"`
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
 }
 
 // @Summary Create a new ingestion schedule
@@ -273,27 +277,22 @@ func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ConnectionID == "" {
+		common.RespondError(w, http.StatusBadRequest, "connection_id is required")
+		return
+	}
+
 	user, _ := common.GetAuthenticatedUser(r.Context())
 	var createdBy *string
 	if user != nil {
 		createdBy = &user.ID
 	}
 
-	if h.encryptor != nil {
-		if err := runs.EncryptScheduleConfig(&runs.Schedule{
-			PluginID: req.PluginID,
-			Config:   req.Config,
-		}, h.encryptor); err != nil {
-			log.Error().Err(err).Msg("Failed to encrypt config")
-			common.RespondError(w, http.StatusInternalServerError, "Failed to encrypt config")
-			return
-		}
-	}
-
 	schedule, err := h.service.CreateSchedule(
 		r.Context(),
 		req.Name,
 		req.PluginID,
+		&req.ConnectionID,
 		req.Config,
 		req.CronExpression,
 		req.Enabled,
@@ -303,6 +302,14 @@ func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == runs.ErrScheduleNameExists {
 			common.RespondError(w, http.StatusConflict, "Schedule with this name already exists")
+			return
+		}
+		if errors.Is(err, connection.ErrNotFound) {
+			common.RespondError(w, http.StatusBadRequest, "Connection not found")
+			return
+		}
+		if err == runs.ErrConnectionTypeMismatch {
+			common.RespondError(w, http.StatusBadRequest, "connection type must match plugin_id")
 			return
 		}
 		if err == runs.ErrInvalidCronExpression {
@@ -446,15 +453,9 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.encryptor != nil {
-		if err := runs.EncryptScheduleConfig(&runs.Schedule{
-			PluginID: req.PluginID,
-			Config:   req.Config,
-		}, h.encryptor); err != nil {
-			log.Error().Err(err).Msg("Failed to encrypt config")
-			common.RespondError(w, http.StatusInternalServerError, "Failed to encrypt config")
-			return
-		}
+	if req.ConnectionID == nil {
+		common.RespondError(w, http.StatusBadRequest, "connection_id is required")
+		return
 	}
 
 	schedule, err := h.service.UpdateSchedule(
@@ -462,6 +463,7 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		id,
 		req.Name,
 		req.PluginID,
+		req.ConnectionID,
 		req.Config,
 		req.CronExpression,
 		req.Enabled,
@@ -470,6 +472,14 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == runs.ErrScheduleNotFound {
 			common.RespondError(w, http.StatusNotFound, "Schedule not found")
+			return
+		}
+		if errors.Is(err, connection.ErrNotFound) {
+			common.RespondError(w, http.StatusBadRequest, "Connection not found")
+			return
+		}
+		if err == runs.ErrConnectionTypeMismatch {
+			common.RespondError(w, http.StatusBadRequest, "connection type must match plugin_id")
 			return
 		}
 		if err == runs.ErrScheduleNameExists {
@@ -777,4 +787,3 @@ func (h *Handler) getJobRunEntities(w http.ResponseWriter, r *http.Request) {
 		"offset":   offset,
 	})
 }
-

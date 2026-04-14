@@ -99,12 +99,6 @@ GRANT SHOW COLUMNS ON *.* TO marmot_user;
 
 ```yaml
 
-host: "clickhouse.company.com"
-port: 9000
-user: "default"
-password: "${CLICKHOUSE_PASSWORD}"
-database: "default"
-secure: false
 include_databases: true
 include_columns: true
 enable_metrics: true
@@ -125,19 +119,13 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| database | string | false | Default database to connect to |
 | enable_metrics | bool | false | Whether to include table metrics (row counts, sizes) |
 | exclude_system_tables | bool | false | Whether to exclude system tables |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | ClickHouse server hostname or IP address |
 | include_columns | bool | false | Whether to include column information in table metadata |
 | include_databases | bool | false | Whether to discover databases |
-| password | string | false | Password for authentication |
-| port | int | false | ClickHouse native protocol port |
-| secure | bool | false | Use TLS/SSL connection |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| user | string | false | Username for authentication |
 
 ## Available Metadata
 

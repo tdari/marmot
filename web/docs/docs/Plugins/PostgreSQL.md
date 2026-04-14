@@ -46,11 +46,11 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO marmot_reader;
 
 ```yaml
 
-host: "prod-postgres.company.com"
-port: 5432
-user: "marmot_reader"
-password: "secure_password_123"
-ssl_mode: "require"
+include_databases: true
+include_columns: true
+enable_metrics: true
+discover_foreign_keys: true
+exclude_system_schemas: true
 tags:
   - "postgres"
   - "production"
@@ -67,14 +67,9 @@ The following configuration options are available:
 | exclude_system_schemas | bool | false | Whether to exclude system schemas (pg_*) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | PostgreSQL server hostname or IP address |
 | include_columns | bool | false | Whether to include column information in table metadata |
 | include_databases | bool | false | Whether to discover databases |
-| password | string | false | Password for authentication |
-| port | int | false | PostgreSQL server port |
-| ssl_mode | string | false | SSL mode (disable, require, verify-ca, verify-full) |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| user | string | false | Username for authentication |
 
 ## Available Metadata
 

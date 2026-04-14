@@ -16,35 +16,28 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/gcs"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for Google Cloud Storage plugin
+// Config for Google Cloud Storage plugin (discovery/pipeline fields only).
+// Connection fields (project_id, credentials_file, credentials_json, endpoint, disable_auth)
+// are provided via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	// Connection options
-	ProjectID           string `json:"project_id" label:"Project ID" description:"Google Cloud project ID" validate:"required"`
-	CredentialsFile     string `json:"credentials_file,omitempty" description:"Path to service account JSON file"`
-	CredentialsJSON     string `json:"credentials_json,omitempty" description:"Service account JSON content" sensitive:"true"`
-	Endpoint            string `json:"endpoint,omitempty" description:"Custom endpoint URL (for fake-gcs-server or other emulators)"`
-	DisableAuth         bool   `json:"disable_auth,omitempty" description:"Disable authentication (for local emulators)"`
-
 	// Discovery options
-	IncludeMetadata  bool `json:"include_metadata" description:"Include bucket metadata like labels" default:"true"`
+	IncludeMetadata    bool `json:"include_metadata" description:"Include bucket metadata like labels" default:"true"`
 	IncludeObjectCount bool `json:"include_object_count" description:"Count objects in each bucket (can be slow for large buckets)" default:"false"`
-
 }
 
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-project_id: "my-gcp-project"
-credentials_file: "/path/to/service-account.json"
 include_metadata: true
 include_object_count: false
 filter:
@@ -58,8 +51,9 @@ tags:
 `
 
 type Source struct {
-	config *Config
-	client *storage.Client
+	config     *Config
+	connConfig *gcs.GCSConfig
+	client     *storage.Client
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -68,15 +62,17 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if config.ProjectID == "" {
-		return nil, fmt.Errorf("project_id is required")
-	}
-
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
 	}
 
+	connConfig, err := plugin.UnmarshalPluginConfig[gcs.GCSConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -86,6 +82,12 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 	s.config = config
+
+	connConfig, err := plugin.UnmarshalPluginConfig[gcs.GCSConfig](pluginConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+	s.connConfig = connConfig
 
 	client, err := s.createClient(ctx)
 	if err != nil {
@@ -120,17 +122,17 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 func (s *Source) createClient(ctx context.Context) (*storage.Client, error) {
 	var opts []option.ClientOption
 
-	if s.config.Endpoint != "" {
-		opts = append(opts, option.WithEndpoint(s.config.Endpoint))
+	if s.connConfig.Endpoint != "" {
+		opts = append(opts, option.WithEndpoint(s.connConfig.Endpoint))
 	}
 
 	switch {
-	case s.config.DisableAuth:
+	case s.connConfig.DisableAuth:
 		opts = append(opts, option.WithoutAuthentication())
-	case s.config.CredentialsJSON != "":
-		opts = append(opts, option.WithCredentialsJSON([]byte(s.config.CredentialsJSON)))
-	case s.config.CredentialsFile != "":
-		opts = append(opts, option.WithCredentialsFile(s.config.CredentialsFile))
+	case s.connConfig.CredentialsJSON != "":
+		opts = append(opts, option.WithCredentialsJSON([]byte(s.connConfig.CredentialsJSON)))
+	case s.connConfig.CredentialsFile != "":
+		opts = append(opts, option.WithCredentialsFile(s.connConfig.CredentialsFile))
 	}
 
 	return storage.NewClient(ctx, opts...)
@@ -139,7 +141,7 @@ func (s *Source) createClient(ctx context.Context) (*storage.Client, error) {
 func (s *Source) discoverBuckets(ctx context.Context) ([]*storage.BucketAttrs, error) {
 	var buckets []*storage.BucketAttrs
 
-	it := s.client.Buckets(ctx, s.config.ProjectID)
+	it := s.client.Buckets(ctx, s.connConfig.ProjectID)
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -222,8 +224,8 @@ func (s *Source) createBucketAsset(ctx context.Context, bucket *storage.BucketAt
 		MRN:       &mrnValue,
 		Type:      "Bucket",
 		Providers: []string{"GCS"},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "GCS",
 			LastSyncAt: time.Now(),

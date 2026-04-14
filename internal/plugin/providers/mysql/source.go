@@ -15,23 +15,19 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/mysql"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for MySQL plugin
+// Config for MySQL plugin (discovery/pipeline fields only).
+// Connection fields (host, port, user, password, database, tls) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-
-	Host     string `json:"host" description:"MySQL server hostname or IP address" validate:"required"`
-	Port     int    `json:"port" description:"MySQL server port" default:"3306" validate:"omitempty,min=1,max=65535"`
-	User     string `json:"user" description:"Username for authentication" validate:"required"`
-	Password string `json:"password" description:"Password for authentication" sensitive:"true"`
-	Database string `json:"database" description:"Database name to connect to" validate:"required"`
-	TLS      string `json:"tls" description:"TLS configuration (false, true, skip-verify, preferred)" default:"false" validate:"omitempty,oneof=false true skip-verify preferred"`
 
 	IncludeColumns      bool `json:"include_columns" description:"Whether to include column information in table metadata" default:"true"`
 	IncludeRowCounts    bool `json:"include_row_counts" description:"Whether to include approximate row counts" default:"true"`
@@ -41,20 +37,18 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-host: "mysql-prod.internal"
-port: 3306
-user: "marmot_user"
-password: "mysql_secure_pass"
-database: "ecommerce"
-tls: "true"
+include_columns: true
+include_row_counts: true
+discover_foreign_keys: true
 tags:
   - "mysql"
   - "ecommerce"
 `
 
 type Source struct {
-	config *Config
-	db     *sql.DB
+	config     *Config
+	connConfig *mysql.MySQLConfig
+	db         *sql.DB
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -62,19 +56,16 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 	if err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
-
-	if config.Port == 0 {
-		config.Port = 3306
-	}
-	if config.TLS == "" {
-		config.TLS = "false"
-	}
-
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
 	}
 
+	connConfig, err := plugin.UnmarshalPluginConfig[mysql.MySQLConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -82,7 +73,8 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	if err := s.initConnection(ctx, s.config.Database); err != nil {
+	// Assume connection is already validated; just open for discovery
+	if err := s.initConnection(ctx, s.connConfig.Database); err != nil {
 		return nil, fmt.Errorf("initializing database connection: %w", err)
 	}
 	defer s.closeConnection()
@@ -90,20 +82,20 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	var assets []asset.Asset
 	var lineages []lineage.LineageEdge
 
-	log.Debug().Str("database", s.config.Database).Msg("Starting table and view discovery")
-	objectAssets, err := s.discoverTablesAndViews(ctx, s.config.Database)
+	log.Debug().Str("database", s.connConfig.Database).Msg("Starting table and view discovery")
+	objectAssets, err := s.discoverTablesAndViews(ctx, s.connConfig.Database)
 	if err != nil {
-		log.Warn().Err(err).Str("database", s.config.Database).Msg("Failed to discover tables and views")
+		log.Warn().Err(err).Str("database", s.connConfig.Database).Msg("Failed to discover tables and views")
 	} else {
 		assets = append(assets, objectAssets...)
 		log.Debug().Int("count", len(objectAssets)).Msg("Discovered tables and views")
 	}
 
 	if s.config.DiscoverForeignKeys {
-		log.Debug().Str("database", s.config.Database).Msg("Starting foreign key discovery")
-		fkLineages, err := s.discoverForeignKeys(ctx, s.config.Database)
+		log.Debug().Str("database", s.connConfig.Database).Msg("Starting foreign key discovery")
+		fkLineages, err := s.discoverForeignKeys(ctx, s.connConfig.Database)
 		if err != nil {
-			log.Warn().Err(err).Str("database", s.config.Database).Msg("Failed to discover foreign key relationships")
+			log.Warn().Err(err).Str("database", s.connConfig.Database).Msg("Failed to discover foreign key relationships")
 		} else {
 			lineages = append(lineages, fkLineages...)
 			log.Debug().Int("count", len(fkLineages)).Msg("Discovered foreign key relationships")
@@ -123,12 +115,12 @@ func (s *Source) initConnection(ctx context.Context, database string) error {
 	defer cancel()
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?tls=%s&parseTime=true&timeout=15s",
-		s.config.User,
-		s.config.Password,
-		s.config.Host,
-		s.config.Port,
+		s.connConfig.User,
+		s.connConfig.Password,
+		s.connConfig.Host,
+		s.connConfig.Port,
 		database,
-		s.config.TLS,
+		s.connConfig.TLS,
 	)
 
 	db, err := sql.Open("mysql", dsn)
@@ -147,8 +139,8 @@ func (s *Source) initConnection(ctx context.Context, database string) error {
 	}
 
 	log.Debug().
-		Str("host", s.config.Host).
-		Int("port", s.config.Port).
+		Str("host", s.connConfig.Host).
+		Int("port", s.connConfig.Port).
 		Str("database", database).
 		Msg("Successfully connected to MySQL")
 
@@ -225,8 +217,8 @@ func (s *Source) discoverTablesAndViews(ctx context.Context, dbName string) ([]a
 			Msg("Found database object")
 
 		metadata := make(map[string]interface{})
-		metadata["host"] = s.config.Host
-		metadata["port"] = s.config.Port
+		metadata["host"] = s.connConfig.Host
+		metadata["port"] = s.connConfig.Port
 		metadata["database"] = dbName
 		metadata["schema"] = schemaName
 		metadata["table_name"] = objectName

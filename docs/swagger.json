@@ -2673,6 +2673,250 @@
                 }
             }
         },
+        "/connections": {
+            "get": {
+                "description": "List all connections with optional filtering",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "connections"
+                ],
+                "summary": "List connections",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by plugin type",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Limit number of results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.ListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new data source connection",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "connections"
+                ],
+                "summary": "Create a new connection",
+                "parameters": [
+                    {
+                        "description": "Connection creation request",
+                        "name": "connection",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.ConnectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/connections/types": {
+            "get": {
+                "description": "Get all available connection types with their configuration specifications",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "connections"
+                ],
+                "summary": "List available connection types",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/connection.ConnectionTypeMeta"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/connections/{id}": {
+            "get": {
+                "description": "Get a connection by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "connections"
+                ],
+                "summary": "Get a connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.ConnectionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update an existing connection",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "connections"
+                ],
+                "summary": "Update a connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Connection update request",
+                        "name": "connection",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1_connections.ConnectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a connection by ID, optionally tearing down associated schedules",
+                "tags": [
+                    "connections"
+                ],
+                "summary": "Delete a connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Delete all schedules using this connection",
+                        "name": "teardown",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_marmotdata_marmot_internal_api_v1_common.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/glossary/": {
             "post": {
                 "description": "Create a new glossary term with name, definition, and optional metadata",
@@ -5775,6 +6019,143 @@
                 }
             }
         },
+        "connection.ConfigField": {
+            "type": "object",
+            "properties": {
+                "default": {},
+                "description": {
+                    "type": "string"
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/connection.ConfigField"
+                    }
+                },
+                "is_array": {
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/connection.FieldOption"
+                    }
+                },
+                "placeholder": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "sensitive": {
+                    "type": "boolean"
+                },
+                "show_when": {
+                    "$ref": "#/definitions/connection.ShowWhen"
+                },
+                "type": {
+                    "$ref": "#/definitions/connection.FieldType"
+                },
+                "validation": {
+                    "$ref": "#/definitions/connection.Validation"
+                }
+            }
+        },
+        "connection.ConnectionTypeMeta": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "config_spec": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/connection.ConfigField"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "connection.FieldOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "connection.FieldType": {
+            "type": "string",
+            "enum": [
+                "string",
+                "int",
+                "bool",
+                "select",
+                "multiselect",
+                "password",
+                "object"
+            ],
+            "x-enum-varnames": [
+                "FieldTypeString",
+                "FieldTypeInt",
+                "FieldTypeBool",
+                "FieldTypeSelect",
+                "FieldTypeMultiselect",
+                "FieldTypePassword",
+                "FieldTypeObject"
+            ]
+        },
+        "connection.ShowWhen": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "connection.Validation": {
+            "type": "object",
+            "properties": {
+                "max": {
+                    "type": "integer"
+                },
+                "max_len": {
+                    "type": "integer"
+                },
+                "min": {
+                    "type": "integer"
+                },
+                "min_len": {
+                    "type": "integer"
+                },
+                "pattern": {
+                    "type": "string"
+                }
+            }
+        },
         "dataproduct.ImagePurpose": {
             "type": "string",
             "enum": [
@@ -6365,8 +6746,13 @@
             "type": "object",
             "properties": {
                 "config": {
+                    "description": "Legacy: kept temporarily for migration",
                     "type": "object",
                     "additionalProperties": true
+                },
+                "connection_id": {
+                    "description": "Reference to Connection entity (nullable for backward compatibility)",
+                    "type": "string"
                 },
                 "created_at": {
                     "type": "string"
@@ -7256,6 +7642,115 @@
                 }
             }
         },
+        "v1_connections.ConnectionResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "description": "Config with sensitive values redacted",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1_connections.CreateRequest": {
+            "type": "object",
+            "required": [
+                "config",
+                "name",
+                "type"
+            ],
+            "properties": {
+                "config": {
+                    "description": "Configuration as flat map - sensitive fields encrypted based on type's ConfigSpec",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1_connections.ListResponse": {
+            "type": "object",
+            "properties": {
+                "connections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1_connections.ConnectionResponse"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1_connections.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "description": "Configuration as flat map - sensitive fields encrypted based on type's ConfigSpec",
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "v1_glossary.CreateTermRequest": {
             "type": "object",
             "required": [
@@ -7766,6 +8261,9 @@
                     "type": "object",
                     "additionalProperties": true
                 },
+                "connection_id": {
+                    "type": "string"
+                },
                 "cron_expression": {
                     "type": "string"
                 },
@@ -7826,6 +8324,9 @@
                 "config": {
                     "type": "object",
                     "additionalProperties": true
+                },
+                "connection_id": {
+                    "type": "string"
                 },
                 "cron_expression": {
                     "type": "string"

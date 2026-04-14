@@ -14,33 +14,28 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection/providers/azureblob"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
 )
 
-// Config for Azure Blob Storage plugin
+// Config for Azure Blob Storage plugin (discovery/pipeline fields only).
+// Connection fields (connection_string, account_name, account_key, endpoint) are provided
+// via the associated Connection and merged at runtime.
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	// Connection options (choose one)
-	ConnectionString string `json:"connection_string,omitempty" description:"Azure Storage connection string" sensitive:"true"`
-	AccountName      string `json:"account_name,omitempty" description:"Azure Storage account name"`
-	AccountKey       string `json:"account_key,omitempty" description:"Azure Storage account key" sensitive:"true"`
-	Endpoint         string `json:"endpoint,omitempty" description:"Custom endpoint URL (for Azurite or other emulators)"`
-
 	// Discovery options
 	IncludeMetadata  bool `json:"include_metadata" description:"Include container metadata" default:"true"`
 	IncludeBlobCount bool `json:"include_blob_count" description:"Count blobs in each container (can be slow for large containers)" default:"false"`
-
 }
 
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
 include_metadata: true
 include_blob_count: false
 filter:
@@ -54,8 +49,9 @@ tags:
 `
 
 type Source struct {
-	config *Config
-	client *azblob.Client
+	config     *Config
+	connConfig *azureblob.AzureBlobConfig
+	client     *azblob.Client
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -64,19 +60,17 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if config.ConnectionString == "" && config.AccountName == "" {
-		return nil, fmt.Errorf("either connection_string or account_name must be provided")
-	}
-
-	if config.AccountName != "" && config.AccountKey == "" && config.ConnectionString == "" {
-		return nil, fmt.Errorf("account_key is required when using account_name")
-	}
-
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
 	}
 
+	connConfig, err := plugin.UnmarshalPluginConfig[azureblob.AzureBlobConfig](rawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+
 	s.config = config
+	s.connConfig = connConfig
 	return rawConfig, nil
 }
 
@@ -86,6 +80,12 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 	s.config = config
+
+	connConfig, err := plugin.UnmarshalPluginConfig[azureblob.AzureBlobConfig](pluginConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+	s.connConfig = connConfig
 
 	client, err := s.createClient()
 	if err != nil {
@@ -119,16 +119,16 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 }
 
 func (s *Source) createClient() (*azblob.Client, error) {
-	if s.config.ConnectionString != "" {
-		return azblob.NewClientFromConnectionString(s.config.ConnectionString, nil)
+	if s.connConfig.ConnectionString != "" {
+		return azblob.NewClientFromConnectionString(s.connConfig.ConnectionString, nil)
 	}
 
-	endpoint := s.config.Endpoint
+	endpoint := s.connConfig.Endpoint
 	if endpoint == "" {
-		endpoint = fmt.Sprintf("https://%s.blob.core.windows.net/", s.config.AccountName)
+		endpoint = fmt.Sprintf("https://%s.blob.core.windows.net/", s.connConfig.AccountName)
 	}
 
-	cred, err := azblob.NewSharedKeyCredential(s.config.AccountName, s.config.AccountKey)
+	cred, err := azblob.NewSharedKeyCredential(s.connConfig.AccountName, s.connConfig.AccountKey)
 	if err != nil {
 		return nil, fmt.Errorf("creating shared key credential: %w", err)
 	}
@@ -222,8 +222,8 @@ func (s *Source) createContainerAsset(ctx context.Context, containerItem *servic
 		MRN:       &mrnValue,
 		Type:      "Container",
 		Providers: []string{"AzureBlob"},
-		Metadata:    metadata,
-		Tags:        processedTags,
+		Metadata:  metadata,
+		Tags:      processedTags,
 		Sources: []asset.AssetSource{{
 			Name:       "AzureBlob",
 			LastSyncAt: time.Now(),

@@ -81,7 +81,6 @@ Or use a custom role with these permissions:
 
 ```yaml
 
-connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
 include_metadata: true
 include_blob_count: false
 filter:
@@ -100,10 +99,6 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| account_key | string | false | Azure Storage account key |
-| account_name | string | false | Azure Storage account name |
-| connection_string | string | false | Azure Storage connection string |
-| endpoint | string | false | Custom endpoint URL (for Azurite or other emulators) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
 | include_blob_count | bool | false | Count blobs in each container (can be slow for large containers) |

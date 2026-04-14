@@ -3,6 +3,7 @@ package trino
 import (
 	"testing"
 
+	"github.com/marmotdata/marmot/internal/core/connection/providers/trino"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,7 +87,7 @@ func TestSource_ValidateDefaults(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, 8080, s.config.Port)
+	assert.Equal(t, 8080, s.connConfig.Port)
 	assert.True(t, s.config.IncludeCatalogs)
 	assert.True(t, s.config.IncludeColumns)
 	assert.False(t, s.config.IncludeStats)
@@ -173,10 +174,10 @@ func TestConnectorMRNNames(t *testing.T) {
 
 func TestCreateTableAsset_NativeProvider(t *testing.T) {
 	s := &Source{
-		config: &Config{
-			BaseConfig: plugin.BaseConfig{},
-			Host:       "trino.example.com",
-			Port:       8080,
+		config: &Config{},
+		connConfig: &trino.TrinoConfig{
+			Host: "trino.example.com",
+			Port: 8080,
 		},
 	}
 

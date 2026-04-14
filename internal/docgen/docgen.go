@@ -88,6 +88,7 @@ type PluginDoc struct {
 	ExampleConfig      string
 	Status             string
 	Features           []string
+	Category           string
 	AdditionalContent  string
 	AdditionalSections []AdditionalSection
 	configSource       string // relative path to source plugin for whitelabel plugins
@@ -98,6 +99,8 @@ type PropertyDoc struct {
 	Type        string
 	Description string
 	Required    bool
+	Sensitive   bool
+	Default     string
 }
 
 type AdditionalSection struct {
@@ -416,6 +419,9 @@ func processFile(pluginDoc *PluginDoc, file *ast.File, registry *TypeRegistry) {
 		if source, ok := markers["config-source"]; ok {
 			pluginDoc.configSource = source
 		}
+		if category, ok := markers["category"]; ok {
+			pluginDoc.Category = category
+		}
 	}
 
 	// Process all declarations
@@ -517,6 +523,9 @@ func processStructFieldsWithRegistry(st *ast.StructType, registry *TypeRegistry,
 		var description string
 		var required bool
 		var name string
+		var labelTag string
+		var sensitive bool
+		var defaultVal string
 
 		fieldType = parseFieldType(field.Type)
 
@@ -557,9 +566,23 @@ func processStructFieldsWithRegistry(st *ast.StructType, registry *TypeRegistry,
 				description = tagDesc
 			}
 			required = tag.Get("required") == "true"
+			if !required {
+				for _, v := range strings.Split(tag.Get("validate"), ",") {
+					if strings.TrimSpace(v) == "required" {
+						required = true
+						break
+					}
+				}
+			}
+			labelTag = tag.Get("label")
+			sensitive = tag.Get("sensitive") == "true"
+			defaultVal = tag.Get("default")
 		}
 
-		name = jsonName
+		name = labelTag
+		if name == "" {
+			name = jsonName
+		}
 		if name == "" {
 			name = field.Names[0].Name
 		}
@@ -569,6 +592,8 @@ func processStructFieldsWithRegistry(st *ast.StructType, registry *TypeRegistry,
 			Type:        fieldType,
 			Description: description,
 			Required:    required,
+			Sensitive:   sensitive,
+			Default:     defaultVal,
 		})
 
 	nextField:
@@ -614,14 +639,14 @@ func parseFieldType(expr ast.Expr) string {
 	}
 }
 
-func writeDoc(doc *PluginDoc, fileName string) error {
+func writeDocWithTemplate(doc *PluginDoc, fileName string, tmplStr string) error {
 	f, err := os.Create(fileName)
 	if err != nil {
 		return fmt.Errorf("creating file: %w", err)
 	}
 	defer f.Close()
 
-	tmpl, err := template.New("plugin-doc").Parse(docTemplate)
+	tmpl, err := template.New("doc").Parse(tmplStr)
 	if err != nil {
 		return fmt.Errorf("parsing template: %w", err)
 	}
@@ -631,4 +656,97 @@ func writeDoc(doc *PluginDoc, fileName string) error {
 	}
 
 	return nil
+}
+
+func writeDoc(doc *PluginDoc, fileName string) error {
+	return writeDocWithTemplate(doc, fileName, docTemplate)
+}
+
+const connectionDocTemplate = `---
+title: {{ .Name }}
+description: {{ .Description }}
+status: {{ .Status }}
+---
+
+# {{ .Name }}
+
+<div class="flex flex-col gap-3 mb-6 pb-6 border-b border-gray-200">
+<div class="flex items-center gap-3">
+{{ if eq .Status "stable" }}<span class="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium bg-earthy-green-300 text-earthy-green-900">Stable</span>{{ else if eq .Status "beta" }}<span class="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium bg-earthy-blue-300 text-earthy-blue-900">Beta</span>{{ else }}<span class="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium bg-earthy-yellow-300 text-earthy-yellow-900">Experimental</span>{{ end }}
+{{if .Category}}<span class="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium bg-earthy-blue-100 text-earthy-blue-900 border border-earthy-blue-300">{{ .Category }}</span>{{end}}
+</div>
+</div>
+
+{{if .ExampleConfig}}
+
+## Example Configuration
+
+` + "```yaml" + `
+{{ .ExampleConfig }}
+` + "```" + `{{end}}{{if .ConfigProperties}}
+
+## Configuration
+
+The following configuration options are available:
+
+| Property | Type | Required | Sensitive | Default | Description |
+|----------|------|----------|-----------|---------|-------------|{{range .ConfigProperties}}
+| {{ .Name }} | {{ .Type }} | {{ .Required }} | {{ .Sensitive }} | {{ .Default }} | {{ .Description }} |{{end}}{{end}}`
+
+func GenerateConnectionDocs(connPath string, outputDir string) error {
+	fset := token.NewFileSet()
+	connDoc := &PluginDoc{}
+	registry := NewTypeRegistry()
+
+	// Collect all type definitions
+	_ = filepath.Walk(connPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		if file, err := parser.ParseFile(fset, path, nil, parser.ParseComments); err == nil {
+			registry.addFile(file)
+		}
+		return nil
+	})
+
+	// Process files for documentation
+	err := filepath.Walk(connPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			return fmt.Errorf("parsing file %s: %w", path, err)
+		}
+		processFile(connDoc, file, registry)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walking connection directory: %w", err)
+	}
+
+	if connDoc.Name == "" {
+		return fmt.Errorf("no connection documentation found")
+	}
+
+	connDoc.ConfigProperties = removeDuplicateProperties(connDoc.ConfigProperties)
+	sort.Slice(connDoc.ConfigProperties, func(i, j int) bool {
+		return connDoc.ConfigProperties[i].Name < connDoc.ConfigProperties[j].Name
+	})
+
+	docsDir := filepath.Join(outputDir, "Connections")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		return fmt.Errorf("creating docs directory: %w", err)
+	}
+
+	// Sanitize name for use as a filename: strip any " (...)" suffix so
+	// parentheses don't break Docusaurus URL routing.
+	safeName := connDoc.Name
+	if idx := strings.Index(safeName, " ("); idx != -1 {
+		safeName = strings.TrimSpace(safeName[:idx])
+	}
+
+	fileName := filepath.Join(docsDir, safeName+".md")
+	fmt.Printf("Writing connection documentation to: %s\n", fileName)
+	return writeDocWithTemplate(connDoc, fileName, connectionDocTemplate)
 }

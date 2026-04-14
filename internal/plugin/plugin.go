@@ -11,9 +11,16 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// ConnectionConfig defines a named connection within the pipeline YAML.
+type ConnectionConfig struct {
+	Name   string                 `json:"name" yaml:"name"`
+	Config map[string]interface{} `json:"config" yaml:"config"`
+}
+
 type Config struct {
-	Name string      `json:"name" yaml:"name"`
-	Runs []SourceRun `json:"runs" yaml:"runs"`
+	Name        string             `json:"name" yaml:"name"`
+	Connections []ConnectionConfig `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Runs        []SourceRun        `json:"runs" yaml:"runs"`
 }
 
 // SourceRun maps source names to their raw configurations
@@ -23,6 +30,19 @@ type SourceRun map[string]RawPluginConfig
 // It uses a `map[string]interface{}` to unmarshal arbitrary JSON data
 // for each plugin's specific config.
 type RawPluginConfig map[string]interface{}
+
+// MergeConfigs merges a connection config (base) with a plugin run config (overlay).
+// Plugin run config values take precedence over connection config values on key collision.
+func MergeConfigs(connConfig, runConfig map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{})
+	for k, v := range connConfig {
+		merged[k] = v
+	}
+	for k, v := range runConfig {
+		merged[k] = v
+	}
+	return merged
+}
 
 type BaseConfig struct {
 	Tags          TagsConfig     `json:"tags,omitempty" description:"Tags to apply to discovered assets"`

@@ -10,6 +10,7 @@
 	import IconifyIcon from '@iconify/svelte';
 	import Icon from '$components/ui/Icon.svelte';
 	import cronstrue from 'cronstrue';
+	import type { Connection } from '$lib/connections/types';
 	import { Cron } from 'croner';
 
 	const pipelineId = $page.params.id;
@@ -61,6 +62,11 @@
 		error?: string;
 	} | null>(null);
 	let loadingAwsStatus = $state(false);
+
+	let connections = $state<Connection[]>([]);
+	let loadingConnections = $state(true);
+	let selectedConnectionId = $state('');
+	let connectionSearchQuery = $state('');
 
 	let selectedPlugin = $derived(plugins.find((p) => p.id === selectedPluginId) || null);
 
@@ -130,6 +136,20 @@
 		}
 	}
 
+	async function fetchConnections() {
+		try {
+			loadingConnections = true;
+			const response = await fetchApi('/connections?limit=1000');
+			if (!response.ok) throw new Error('Failed to fetch connections');
+			const data = await response.json();
+			connections = data.connections || [];
+		} catch (err) {
+			console.error('Error fetching connections:', err);
+		} finally {
+			loadingConnections = false;
+		}
+	}
+
 	async function fetchAWSCredentialStatus() {
 		try {
 			loadingAwsStatus = true;
@@ -181,6 +201,7 @@
 			cronExpression = pipeline.cron_expression || '';
 			disableSchedule = !pipeline.enabled && !!pipeline.cron_expression;
 			config = pipeline.config || {};
+			selectedConnectionId = pipeline.connection_id || '';
 
 			// Ensure base fields have proper defaults
 			if (!config.tags) config.tags = [];
@@ -220,7 +241,8 @@
 				plugin_id: selectedPluginId,
 				config,
 				cron_expression: cronExpression,
-				enabled
+				enabled,
+				connection_id: selectedConnectionId || undefined,
 			};
 
 			const response = await fetchApi(`/ingestion/schedules/${pipelineId}`, {
@@ -306,6 +328,7 @@
 		}
 		await fetchPlugins();
 		await fetchPipeline();
+		await fetchConnections();
 		// Check if this is an AWS plugin and fetch credential status
 		if (
 			selectedPluginId &&
@@ -525,6 +548,114 @@
 						</div>
 					{/if}
 				</div>
+			</div>
+
+			<!-- Connection Selector -->
+			<div
+				class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6"
+			>
+				<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+					<IconifyIcon
+						icon="material-symbols:link"
+						class="h-5 w-5 mr-2 text-earthy-terracotta-600"
+					/>
+					Connection <span class="text-red-500 ml-1">*</span>
+				</h3>
+				<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+					Choose a connection for this pipeline
+				</p>
+				
+				{#if loadingConnections}
+					<div class="flex items-center justify-center py-8 border border-gray-300 dark:border-gray-600 rounded-lg">
+						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-earthy-terracotta-700"></div>
+						<span class="ml-3 text-sm text-gray-500">Loading connections...</span>
+					</div>
+				{:else if connections.length === 0}
+					<div class="py-8 px-4 border-2 border-dashed border-red-300 dark:border-red-600 rounded-lg text-center">
+						<IconifyIcon
+							icon="material-symbols:link-off"
+							class="h-10 w-10 text-red-400 mx-auto mb-3"
+						/>
+						<p class="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+							No connections available
+						</p>
+						<p class="text-sm text-red-700 dark:text-red-300">
+							You need to create a connection before updating this pipeline.
+						</p>
+					</div>
+				{:else}
+					<!-- Connection Search -->
+					<div class="mb-4">
+						<div class="relative">
+							<IconifyIcon
+								icon="material-symbols:search"
+								class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400"
+							/>
+							<input
+								type="text"
+								bind:value={connectionSearchQuery}
+								placeholder="Search connections..."
+								class="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-earthy-terracotta-600 focus:border-transparent transition-all"
+							/>
+						</div>
+					</div>
+
+					<!-- Connection List -->
+					{@const filteredConnections = connections.filter(conn => 
+						connectionSearchQuery === '' || 
+						conn.name.toLowerCase().includes(connectionSearchQuery.toLowerCase()) ||
+						conn.type.toLowerCase().includes(connectionSearchQuery.toLowerCase()) ||
+						conn.description?.toLowerCase().includes(connectionSearchQuery.toLowerCase())
+					)}
+					
+					{#if filteredConnections.length === 0}
+						<p class="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
+							No connections found matching "{connectionSearchQuery}"
+						</p>
+					{:else}
+						<div class="space-y-2 max-h-80 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+							{#each filteredConnections as conn}
+								<button
+									type="button"
+									onclick={() => selectedConnectionId = conn.id}
+									class="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors flex items-center gap-3 {selectedConnectionId === conn.id ? 'bg-earthy-terracotta-50 dark:bg-earthy-terracotta-900/20 border-2 border-earthy-terracotta-500' : 'border-b border-gray-200 dark:border-gray-700'}"
+								>
+									<div class="flex-shrink-0">
+										{#if selectedConnectionId === conn.id}
+											<div class="h-6 w-6 rounded-full bg-earthy-terracotta-600 flex items-center justify-center">
+												<IconifyIcon icon="material-symbols:check" class="h-4 w-4 text-white" />
+											</div>
+										{:else}
+											<div class="h-6 w-6 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
+										{/if}
+									</div>
+									<div class="flex-1 min-w-0">
+										<div class="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
+											{conn.name}
+										</div>
+										<div class="flex items-center gap-2 mt-0.5">
+											<span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+												{conn.type}
+											</span>
+											{#if conn.description}
+												<span class="text-xs text-gray-500 dark:text-gray-400 truncate">
+													{conn.description}
+												</span>
+											{/if}
+										</div>
+									</div>
+									{#if !conn.is_active}
+										<div class="flex-shrink-0">
+											<span class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300">
+												Inactive
+											</span>
+										</div>
+									{/if}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				{/if}
 			</div>
 
 			<!-- Plugin Selection (Read-only in edit mode) -->

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmotdata/marmot/internal/background"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	"github.com/marmotdata/marmot/internal/core/connection"
 	"github.com/marmotdata/marmot/internal/crypto"
 	"github.com/marmotdata/marmot/internal/plugin"
 	"github.com/rs/zerolog/log"
@@ -23,11 +24,12 @@ const (
 )
 
 type Scheduler struct {
-	service     *ScheduleService
-	runsService Service
-	encryptor   *crypto.Encryptor
-	registry    *plugin.Registry
-	db          *pgxpool.Pool
+	service           *ScheduleService
+	runsService       Service
+	connectionService connection.Service
+	encryptor         *crypto.Encryptor
+	registry          *plugin.Registry
+	db                *pgxpool.Pool
 
 	maxWorkers        int
 	schedulerInterval time.Duration
@@ -53,7 +55,7 @@ type SchedulerConfig struct {
 	DB                *pgxpool.Pool
 }
 
-func NewScheduler(service *ScheduleService, runsService Service, encryptor *crypto.Encryptor, registry *plugin.Registry, config *SchedulerConfig) *Scheduler {
+func NewScheduler(service *ScheduleService, runsService Service, connectionService connection.Service, encryptor *crypto.Encryptor, registry *plugin.Registry, config *SchedulerConfig) *Scheduler {
 	if config == nil {
 		config = &SchedulerConfig{}
 	}
@@ -81,6 +83,7 @@ func NewScheduler(service *ScheduleService, runsService Service, encryptor *cryp
 	return &Scheduler{
 		service:           service,
 		runsService:       runsService,
+		connectionService: connectionService,
 		encryptor:         encryptor,
 		registry:          registry,
 		db:                config.DB,
@@ -173,7 +176,7 @@ func (s *Scheduler) jobDispatcher() {
 					s.activeWorkers.Add(-1)
 				}()
 
-				worker := newWorker(s.service, s.runsService, s.encryptor, s.registry)
+				worker := newWorker(s.service, s.runsService, s.connectionService, s.encryptor, s.registry)
 				if err := worker.executeJob(s.ctx, j); err != nil {
 					log.Error().
 						Err(err).
@@ -283,18 +286,20 @@ func (s *Scheduler) leaseCleanupLoop() {
 }
 
 type worker struct {
-	service     *ScheduleService
-	runsService Service
-	encryptor   *crypto.Encryptor
-	registry    *plugin.Registry
+	service           *ScheduleService
+	runsService       Service
+	connectionService connection.Service
+	encryptor         *crypto.Encryptor
+	registry          *plugin.Registry
 }
 
-func newWorker(service *ScheduleService, runsService Service, encryptor *crypto.Encryptor, registry *plugin.Registry) *worker {
+func newWorker(service *ScheduleService, runsService Service, connectionService connection.Service, encryptor *crypto.Encryptor, registry *plugin.Registry) *worker {
 	return &worker{
-		service:     service,
-		runsService: runsService,
-		encryptor:   encryptor,
-		registry:    registry,
+		service:           service,
+		runsService:       runsService,
+		connectionService: connectionService,
+		encryptor:         encryptor,
+		registry:          registry,
 	}
 }
 
@@ -319,11 +324,31 @@ func (w *worker) executeJob(ctx context.Context, run *JobRun) error {
 		return fmt.Errorf("getting schedule: %w", err)
 	}
 
-	if err := DecryptScheduleConfig(schedule, w.encryptor); err != nil {
-		errorMsg := fmt.Sprintf("Failed to decrypt config: %v", err)
+	// Validate schedule has connection_id
+	if schedule.ConnectionID == nil {
+		errorMsg := "Schedule missing connection_id - migration required"
 		_ = w.service.CompleteJobRun(ctx, run.ID, false, &errorMsg, 0, 0, 0, 0, 0)
-		return fmt.Errorf("decrypting config: %w", err)
+		return fmt.Errorf("schedule %s has no connection_id", schedule.ID)
 	}
+
+	// Fetch connection
+	conn, err := w.connectionService.Get(ctx, *schedule.ConnectionID)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Failed to get connection: %v", err)
+		_ = w.service.CompleteJobRun(ctx, run.ID, false, &errorMsg, 0, 0, 0, 0, 0)
+		return fmt.Errorf("getting connection: %w", err)
+	}
+
+	// Merge connection config with schedule config
+	// Connection config provides credentials/connection settings
+	// Schedule config provides plugin-specific settings (discovery options, tags, filters)
+	pluginConfig := plugin.MergeConfigs(conn.Config, schedule.Config)
+
+	log.Info().
+		Str("run_id", run.ID).
+		Str("connection_id", conn.ID).
+		Str("connection_name", conn.Name).
+		Msg("Using connection for job execution")
 
 	source, err := w.registry.GetSource(schedule.PluginID)
 	if err != nil {
@@ -332,7 +357,7 @@ func (w *worker) executeJob(ctx context.Context, run *JobRun) error {
 		return fmt.Errorf("getting plugin source: %w", err)
 	}
 
-	validatedConfig, err := source.Validate(schedule.Config)
+	validatedConfig, err := source.Validate(pluginConfig)
 	if err != nil {
 		errorMsg := fmt.Sprintf("Failed to validate plugin config: %v", err)
 		_ = w.service.CompleteJobRun(ctx, run.ID, false, &errorMsg, 0, 0, 0, 0, 0)

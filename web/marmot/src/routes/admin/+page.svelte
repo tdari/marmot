@@ -3,6 +3,7 @@
 	import UserManagement from '$components/user/UserManagement.svelte';
 	import TeamManagement from '$components/team/TeamManagement.svelte';
 	import SearchManagement from '$components/admin/SearchManagement.svelte';
+	import ConnectionManagement from '$components/connection/ConnectionManagement.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -10,6 +11,7 @@
 	const tabs = [
 		{ id: 'users', label: 'Users' },
 		{ id: 'teams', label: 'Teams' },
+		{ id: 'connections', label: 'Connections' },
 		{ id: 'system', label: 'System' }
 	];
 
@@ -34,6 +36,10 @@
 			{:else if activeTab === 'teams'}
 				<div class="animate-slide-down">
 					<TeamManagement />
+				</div>
+			{:else if activeTab === 'connections'}
+				<div class="animate-slide-down">
+					<ConnectionManagement />
 				</div>
 			{:else if activeTab === 'system'}
 				<div class="animate-slide-down">

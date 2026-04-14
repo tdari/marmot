@@ -78,9 +78,9 @@ The following configuration options are available:
 | include_manifest | bool | false | Include manifest.json for model definitions |
 | include_run_results | bool | false | Include run_results.json for test results |
 | include_sources_json | bool | false | Include sources.json for source definitions |
-| project_name | string | false | DBT project name |
+| project_name | string | true | DBT project name |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| target_path | string | false | Path to DBT target directory containing manifest.json, catalog.json, etc. |
+| target_path | string | true | Path to DBT target directory containing manifest.json, catalog.json, etc. |
 
 ## Available Metadata
 

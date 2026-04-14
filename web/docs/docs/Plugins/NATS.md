@@ -50,9 +50,6 @@ The plugin supports several authentication methods:
 
 ```yaml
 
-host: "localhost"
-port: 4222
-token: "s3cr3t"
 filter:
   include:
     - "^ORDERS"
@@ -67,17 +64,9 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| credentials_file | string | false | Path to NATS credentials file (.creds) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | NATS server hostname or IP address |
-| password | string | false | Password for authentication |
-| port | int | false | NATS server port |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| tls | bool | false | Enable TLS connection |
-| tls_insecure | bool | false | Skip TLS certificate verification |
-| token | string | false | Authentication token |
-| username | string | false | Username for authentication |
 
 ## Available Metadata
 

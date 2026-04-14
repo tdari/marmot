@@ -97,18 +97,11 @@ The `s3:GetObject` permission is needed because Glue's `LoadTable` reads Iceberg
 
 ```yaml
 
-# REST catalog (default)
-uri: "http://localhost:8181"
-warehouse: "my-warehouse"
-credential: "client-id:client-secret"
+catalog_type: "rest"
+include_namespaces: true
+include_views: true
 tags:
   - "iceberg"
-
-# Glue catalog:
-# catalog_type: "glue"
-# credentials:
-#   region: "us-east-1"
-# glue_catalog_id: "123456789012"  # optional, defaults to caller's account
 
 ```
 
@@ -118,21 +111,12 @@ The following configuration options are available:
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | catalog_type | string | false | Catalog backend type |
-| credential | string | false | Credential for OAuth2 client credentials authentication |
-| credentials | AWSCredentials | false | AWS credentials configuration |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
 | glue_catalog_id | string | false | AWS Glue Data Catalog ID (defaults to caller's account) |
 | include_namespaces | bool | false | Whether to discover namespaces as assets |
-| include_tags | []string | false | List of AWS tags to include as metadata. By default, all tags are included. |
 | include_views | bool | false | Whether to discover views |
-| prefix | string | false | Optional prefix for the REST catalog |
-| properties | map[string]string | false | Additional catalog properties |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| tags_to_metadata | bool | false | Convert AWS tags to Marmot metadata |
-| token | string | false | Bearer token for authentication |
-| uri | string | false | REST catalog URI (required for catalog_type=rest) |
-| warehouse | string | false | Warehouse identifier |
 
 ## Available Metadata
 

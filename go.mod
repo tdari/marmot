@@ -33,6 +33,7 @@ require (
 	github.com/jackc/pgtype v1.14.4
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/jackc/tern/v2 v2.3.5
+	github.com/lib/pq v1.10.9
 	github.com/marmotdata/marmot/client v0.0.0-00010101000000-000000000000
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/nats-io/nats.go v1.48.0

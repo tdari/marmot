@@ -16,6 +16,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionbigquery "github.com/marmotdata/marmot/internal/core/connection/providers/bigquery"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -28,31 +29,31 @@ import (
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
 
-	ProjectID             string `json:"project_id" label:"Project ID" description:"Google Cloud Project ID" validate:"required"`
-	CredentialsPath       string `json:"credentials_path,omitempty" description:"Path to service account credentials JSON file"`
-	CredentialsJSON       string `json:"credentials_json,omitempty" description:"Service account credentials JSON content" sensitive:"true"`
-	UseDefaultCredentials bool   `json:"use_default_credentials" description:"Use default Google Cloud credentials" default:"false"`
-
 	IncludeDatasets       bool `json:"include_datasets" description:"Whether to discover datasets" default:"true"`
 	IncludeTableStats     bool `json:"include_table_stats" description:"Whether to include table statistics (row count, size)" default:"true"`
 	IncludeViews          bool `json:"include_views" description:"Whether to discover views" default:"true"`
 	IncludeExternalTables bool `json:"include_external_tables" description:"Whether to discover external tables" default:"true"`
 	ExcludeSystemDatasets bool `json:"exclude_system_datasets" description:"Whether to exclude system datasets (_script, _analytics, etc.)" default:"true"`
-	MaxConcurrentRequests int            `json:"max_concurrent_requests" description:"Maximum number of concurrent API requests" default:"10" validate:"omitempty,min=1,max=100"`
+	MaxConcurrentRequests int  `json:"max_concurrent_requests" description:"Maximum number of concurrent API requests" default:"10" validate:"omitempty,min=1,max=100"`
 }
 
 // +marmot:example-config
 var _ = `
-project_id: "company-data-warehouse"
-credentials_path: "/etc/marmot/bq-service-account.json"
+include_datasets: true
+include_table_stats: true
+include_views: true
+include_external_tables: true
+exclude_system_datasets: true
+max_concurrent_requests: 10
 tags:
   - "bigquery"
   - "data-warehouse"
 `
 
 type Source struct {
-	config *Config
-	client *bigquery.Client
+	config     *Config
+	connConfig *connectionbigquery.BigQueryConfig
+	client     *bigquery.Client
 }
 
 type TableType string
@@ -86,29 +87,17 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 		return nil, err
 	}
 
-	authMethods := 0
-	if config.CredentialsPath != "" {
-		authMethods++
-	}
-	if config.CredentialsJSON != "" {
-		authMethods++
-	}
-	if config.UseDefaultCredentials {
-		authMethods++
-	}
-
-	if authMethods == 0 {
-		return nil, fmt.Errorf("at least one authentication method must be provided: credentials_path, credentials_json, or use_default_credentials")
-	}
-	if authMethods > 1 {
-		return nil, fmt.Errorf("only one authentication method should be provided")
-	}
-
 	s.config = config
 	return rawConfig, nil
 }
 
 func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConfig) (*plugin.DiscoveryResult, error) {
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionbigquery.BigQueryConfig](pluginConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
+	}
+	s.connConfig = connConfig
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
@@ -172,13 +161,13 @@ func (s *Source) initClient(ctx context.Context) error {
 		}
 		opts = append(opts, option.WithEndpoint(emulatorHost))
 		opts = append(opts, option.WithoutAuthentication())
-	} else if s.config.CredentialsPath != "" {
-		opts = append(opts, option.WithCredentialsFile(s.config.CredentialsPath))
-	} else if s.config.CredentialsJSON != "" {
-		opts = append(opts, option.WithCredentialsJSON([]byte(s.config.CredentialsJSON)))
+	} else if s.connConfig.CredentialsPath != "" {
+		opts = append(opts, option.WithCredentialsFile(s.connConfig.CredentialsPath))
+	} else if s.connConfig.CredentialsJSON != "" {
+		opts = append(opts, option.WithCredentialsJSON([]byte(s.connConfig.CredentialsJSON)))
 	}
 
-	client, err := bigquery.NewClient(ctx, s.config.ProjectID, opts...)
+	client, err := bigquery.NewClient(ctx, s.connConfig.ProjectID, opts...)
 	if err != nil {
 		return fmt.Errorf("creating BigQuery client: %w", err)
 	}
@@ -192,7 +181,7 @@ func (s *Source) initClient(ctx context.Context) error {
 		return fmt.Errorf("testing BigQuery connection: %w", err)
 	}
 
-	log.Debug().Str("project_id", s.config.ProjectID).Msg("Successfully connected to BigQuery")
+	log.Debug().Str("project_id", s.connConfig.ProjectID).Msg("Successfully connected to BigQuery")
 	return nil
 }
 
@@ -204,7 +193,7 @@ func (s *Source) closeClient() {
 }
 
 func (s *Source) discoverDatasets(ctx context.Context) ([]asset.Asset, error) {
-	log.Debug().Str("project_id", s.config.ProjectID).Msg("Discovering datasets")
+	log.Debug().Str("project_id", s.connConfig.ProjectID).Msg("Discovering datasets")
 
 	it := s.client.Datasets(ctx)
 	var assets []asset.Asset
@@ -239,7 +228,7 @@ func (s *Source) discoverDatasets(ctx context.Context) ([]asset.Asset, error) {
 			Msg("Found dataset")
 
 		assetMetadata := make(map[string]interface{})
-		assetMetadata["project_id"] = s.config.ProjectID
+		assetMetadata["project_id"] = s.connConfig.ProjectID
 		assetMetadata["dataset_id"] = datasetID
 		assetMetadata["location"] = metadata.Location
 		assetMetadata["creation_time"] = metadata.CreationTime.Format(time.RFC3339)
@@ -274,8 +263,8 @@ func (s *Source) discoverDatasets(ctx context.Context) ([]asset.Asset, error) {
 			MRN:       &mrnValue,
 			Type:      "Dataset",
 			Providers: []string{"BigQuery"},
-			Metadata:    assetMetadata,
-			Tags:        processedTags,
+			Metadata:  assetMetadata,
+			Tags:      processedTags,
 			Sources: []asset.AssetSource{{
 				Name:       "BigQuery",
 				LastSyncAt: time.Now(),
@@ -329,7 +318,7 @@ func (s *Source) discoverTables(ctx context.Context, datasetID string) ([]asset.
 			Msg("Found table")
 
 		assetMetadata := make(map[string]interface{})
-		assetMetadata["project_id"] = s.config.ProjectID
+		assetMetadata["project_id"] = s.connConfig.ProjectID
 		assetMetadata["dataset_id"] = datasetID
 		assetMetadata["table_id"] = tableID
 		assetMetadata["table_type"] = string(tableType)
@@ -394,13 +383,13 @@ func (s *Source) discoverTables(ctx context.Context, datasetID string) ([]asset.
 		switch tableType {
 		case TableTypeTable:
 			assetType = "Table"
-			assetDesc = fmt.Sprintf("BigQuery table %s.%s in project %s", datasetID, tableID, s.config.ProjectID)
+			assetDesc = fmt.Sprintf("BigQuery table %s.%s in project %s", datasetID, tableID, s.connConfig.ProjectID)
 		case TableTypeView:
 			assetType = "View"
-			assetDesc = fmt.Sprintf("BigQuery view %s.%s in project %s", datasetID, tableID, s.config.ProjectID)
+			assetDesc = fmt.Sprintf("BigQuery view %s.%s in project %s", datasetID, tableID, s.connConfig.ProjectID)
 		case TableTypeExternal:
 			assetType = "ExternalTable"
-			assetDesc = fmt.Sprintf("BigQuery external table %s.%s in project %s", datasetID, tableID, s.config.ProjectID)
+			assetDesc = fmt.Sprintf("BigQuery external table %s.%s in project %s", datasetID, tableID, s.connConfig.ProjectID)
 		default:
 			continue
 		}

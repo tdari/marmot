@@ -55,6 +55,7 @@
 								{message}
 							</p>
 						</div>
+						<slot />
 						{#if requireConfirmation}
 							<div class="mt-4">
 								<label

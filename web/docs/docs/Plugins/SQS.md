@@ -69,12 +69,9 @@ import { Collapsible } from "@site/src/components/Collapsible";
 
 ```yaml
 
-credentials:
-  region: "us-east-1" 
-  id: "<aws-secret-id>"
-  secret: "<aws-secret-key>"
+discover_dlq: true
 tags:
-  - "sns"
+  - "sqs"
 
 ```
 
@@ -83,7 +80,6 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| credentials | AWSCredentials | false | AWS credentials configuration |
 | discover_dlq | bool | false | Discover Dead Letter Queue relationships |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |

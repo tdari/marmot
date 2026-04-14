@@ -305,10 +305,18 @@ func runIngestion(ctx context.Context) error {
 
 	fmt.Printf("Pipeline: %s\n\n", config.Name)
 
+	connMap := make(map[string]map[string]interface{}, len(config.Connections))
+	for _, c := range config.Connections {
+		if c.Name == "" {
+			return fmt.Errorf("connection entry is missing a name")
+		}
+		connMap[c.Name] = c.Config
+	}
+
 	overallSummary := &Summary{}
 
 	for _, run := range config.Runs {
-		if err := executeRun(ctx, run, client, overallSummary, config); err != nil {
+		if err := executeRun(ctx, run, client, overallSummary, config, connMap); err != nil {
 			return err
 		}
 	}
@@ -372,13 +380,23 @@ func runDestroy(ctx context.Context, config plugin.Config, client *apiClient) er
 	return nil
 }
 
-func executeRun(ctx context.Context, run plugin.SourceRun, client *apiClient, overallSummary *Summary, config plugin.Config) error {
+func executeRun(ctx context.Context, run plugin.SourceRun, client *apiClient, overallSummary *Summary, config plugin.Config, connMap map[string]map[string]interface{}) error {
 	registry := plugin.GetRegistry()
 
 	for sourceName, rawConfig := range run {
 		entry, err := registry.Get(sourceName)
 		if err != nil {
 			return fmt.Errorf("unknown source: %s", sourceName)
+		}
+
+		// Resolve connection reference if present
+		if ref, ok := rawConfig["connection"].(string); ok {
+			connConfig, found := connMap[ref]
+			if !found {
+				return fmt.Errorf("source %q references unknown connection %q (not defined in connections: block)", sourceName, ref)
+			}
+			delete(rawConfig, "connection")
+			rawConfig = plugin.MergeConfigs(connConfig, rawConfig)
 		}
 
 		source := entry.Source
@@ -765,4 +783,3 @@ func printDestroySummary(response *DestroyRunResponse, totalDeleted int, pipelin
 		fmt.Printf("\n%s⚠️  No resources were found to delete%s\n", colorYellow, colorReset)
 	}
 }
-

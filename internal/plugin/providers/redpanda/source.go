@@ -22,12 +22,13 @@ func init() {
 	)
 
 	meta := plugin.PluginMeta{
-		ID:          "redpanda",
-		Name:        "Redpanda",
-		Description: "Discover topics from Redpanda clusters",
-		Icon:        "redpanda",
-		Category:    "streaming",
-		ConfigSpec:  spec,
+		ID:              "redpanda",
+		Name:            "Redpanda",
+		Description:     "Discover topics from Redpanda clusters",
+		Icon:            "redpanda",
+		Category:        "streaming",
+		ConfigSpec:      spec,
+		ConnectionTypes: []string{"kafka"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &kafka.Source{}); err != nil {

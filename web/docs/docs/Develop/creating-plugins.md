@@ -4,7 +4,18 @@ This guide walks you through creating a simple HelloWorld plugin for Marmot that
 
 import { CalloutCard } from '@site/src/components/DocCard';
 
-> **Documentation Comments**: The `+marmot:` comments throughout the code are used by Marmot's documentation generator. Always include these comments - they provide metadata for the plugin registry and generate user-facing documentation.
+> **Documentation Comments**: The `+marmot:` comments throughout the code are used by Marmot's documentation generator. Always include these comments, as they provide metadata for the plugin registry and generate user-facing documentation.
+
+## Plugins and Connections
+
+In Marmot, **plugins** and **connections** are separate concerns:
+
+- A **connection** stores credentials and host configuration for an external system (hostname, port, username, password, API key). Connections are created once and reused across many schedules. Sensitive fields are encrypted at rest.
+- A **plugin** contains the discovery logic and run-specific settings (what assets to discover, filtering rules, tag configuration). It does **not** include credentials.
+
+When a schedule runs, Marmot fetches the linked connection's config and merges it with the plugin's run config using `plugin.MergeConfigs`. The combined map is passed to `Discover`. This means your plugin's `Config` struct should only contain fields that control *what* to discover, not *how* to authenticate.
+
+If you're building a plugin that connects to an external system, you'll typically also need a companion connection type. See [Creating a Connection](/docs/Develop/creating-connections) for the full walkthrough.
 
 ## 1. Create the Plugin Package
 
@@ -40,7 +51,8 @@ type Source struct {
     config *Config
 }
 
-// Config for HelloWorld plugin
+// Config for HelloWorld plugin.
+// Only contains discovery-specific settings
 // +marmot:config
 type Config struct {
     plugin.BaseConfig `json:",inline"`
@@ -212,7 +224,9 @@ import (
 
 ## 5. Test the Plugin
 
-Create a test configuration file `hello.yaml`:
+The HelloWorld plugin doesn't connect to an external system, so it doesn't need a connection. For plugins that do connect to external systems, a connection must be created first and linked to the schedule.
+
+For this example, create a test configuration file `hello.yaml`:
 
 ```yaml
 name: "helloworld"
@@ -278,7 +292,7 @@ All plugins must implement the `plugin.Source` interface:
 
 ```go
 type Source interface {
-    Validate(rawConfig RawPluginConfig) error
+    Validate(rawConfig RawPluginConfig) (RawPluginConfig, error)
     Discover(ctx context.Context, config RawPluginConfig) (*DiscoveryResult, error)
 }
 ```

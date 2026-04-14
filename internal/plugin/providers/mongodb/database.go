@@ -33,8 +33,8 @@ func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 		statsCancel()
 
 		metadata := make(map[string]interface{})
-		metadata["host"] = s.config.Host
-		metadata["port"] = s.config.Port
+		metadata["host"] = s.connConfig.Host
+		metadata["port"] = s.connConfig.Port
 		metadata["database"] = dbName
 		metadata["created"] = time.Now().Format("2006-01-02 15:04:05")
 
@@ -73,8 +73,8 @@ func (s *Source) discoverDatabases(ctx context.Context) ([]asset.Asset, error) {
 			MRN:       &mrnValue,
 			Type:      "Database",
 			Providers: []string{"MongoDB"},
-			Metadata:    metadata,
-			Tags:        processedTags,
+			Metadata:  metadata,
+			Tags:      processedTags,
 			Sources: []asset.AssetSource{{
 				Name:       "MongoDB",
 				LastSyncAt: time.Now(),

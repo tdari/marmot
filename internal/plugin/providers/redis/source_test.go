@@ -15,24 +15,21 @@ func TestSource_Validate(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid host config",
+			name: "valid config",
+			config: plugin.RawPluginConfig{
+				"discover_all_databases": true,
+			},
+		},
+		{
+			name: "empty config",
+			config: plugin.RawPluginConfig{},
+		},
+		{
+			name: "with host and port",
 			config: plugin.RawPluginConfig{
 				"host": "localhost",
 				"port": 6379,
 			},
-		},
-		{
-			name:    "missing host",
-			config:  plugin.RawPluginConfig{},
-			wantErr: "host",
-		},
-		{
-			name: "invalid port",
-			config: plugin.RawPluginConfig{
-				"host": "localhost",
-				"port": 99999,
-			},
-			wantErr: "port",
 		},
 		{
 			name: "with tls",
@@ -45,7 +42,6 @@ func TestSource_Validate(t *testing.T) {
 		{
 			name: "with filter",
 			config: plugin.RawPluginConfig{
-				"host": "localhost",
 				"filter": map[string]interface{}{
 					"include": []interface{}{"^db0$"},
 				},
@@ -69,11 +65,8 @@ func TestSource_Validate(t *testing.T) {
 
 func TestSource_ValidateDefaults(t *testing.T) {
 	s := &Source{}
-	_, err := s.Validate(plugin.RawPluginConfig{
-		"host": "localhost",
-	})
+	_, err := s.Validate(plugin.RawPluginConfig{})
 	require.NoError(t, err)
-	assert.Equal(t, 6379, s.config.Port)
 	assert.True(t, s.config.DiscoverAllDatabases)
 }
 

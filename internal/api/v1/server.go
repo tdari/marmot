@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/marmotdata/marmot/docs"
 	"github.com/marmotdata/marmot/internal/api/v1/assets"
+	connectionsAPI "github.com/marmotdata/marmot/internal/api/v1/connections"
 	"github.com/marmotdata/marmot/internal/api/v1/health"
 	"github.com/marmotdata/marmot/internal/crypto"
 
@@ -42,6 +43,22 @@ import (
 	_ "github.com/marmotdata/marmot/internal/plugin/providers/sqs"
 	_ "github.com/marmotdata/marmot/internal/plugin/providers/trino"
 
+	// Connection provider imports
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/airflow"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/azureblob"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/bigquery"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/clickhouse"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/gcs"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/iceberg"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/kafka"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/mongodb"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/mysql"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/nats"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/postgresql"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/redis"
+	_ "github.com/marmotdata/marmot/internal/core/connection/providers/trino"
+
 	"github.com/marmotdata/marmot/internal/api/auth"
 	adminAPI "github.com/marmotdata/marmot/internal/api/v1/admin"
 	assetrulesAPI "github.com/marmotdata/marmot/internal/api/v1/assetrules"
@@ -67,6 +84,7 @@ import (
 	"github.com/marmotdata/marmot/internal/core/assetdocs"
 	assetruleService "github.com/marmotdata/marmot/internal/core/assetrule"
 	authService "github.com/marmotdata/marmot/internal/core/auth"
+	connectionService "github.com/marmotdata/marmot/internal/core/connection"
 	dataproductService "github.com/marmotdata/marmot/internal/core/dataproduct"
 	docsService "github.com/marmotdata/marmot/internal/core/docs"
 	"github.com/marmotdata/marmot/internal/core/enrichment"
@@ -286,6 +304,11 @@ func New(config *config.Config, db *pgxpool.Pool) *Server {
 
 	pluginRegistry := plugin.GetRegistry()
 
+	// Connection repository and service for credential management (uses same encryptor as schedules)
+	connectionRepo := connectionService.NewPostgresRepository(db, scheduleEncryptor)
+	connectionSvc := connectionService.NewService(connectionRepo)
+	scheduleSvc.SetConnectionService(connectionSvc)
+
 	schedulerConfig := &runService.SchedulerConfig{
 		MaxWorkers:        config.Pipelines.MaxWorkers,
 		SchedulerInterval: time.Duration(config.Pipelines.SchedulerInterval) * time.Second,
@@ -293,7 +316,7 @@ func New(config *config.Config, db *pgxpool.Pool) *Server {
 		ClaimExpiry:       time.Duration(config.Pipelines.ClaimExpiry) * time.Second,
 		DB:                db,
 	}
-	scheduler := runService.NewScheduler(scheduleSvc, runsSvc, scheduleEncryptor, pluginRegistry, schedulerConfig)
+	scheduler := runService.NewScheduler(scheduleSvc, runsSvc, connectionSvc, scheduleEncryptor, pluginRegistry, schedulerConfig)
 
 	if err := scheduler.Start(context.Background()); err != nil {
 		log.Error().Err(err).Msg("Failed to start scheduler")
@@ -512,6 +535,7 @@ func New(config *config.Config, db *pgxpool.Pool) *Server {
 		subscriptionsAPI.NewHandler(subscriptionSvc, userSvc, authSvc, config),
 		teams.NewHandler(teamSvc, userSvc, authSvc, config),
 		webhooksAPI.NewHandler(webhookSvc, teamSvc, userSvc, authSvc, config, encryptionConfigured),
+		connectionsAPI.NewHandler(connectionSvc, userSvc, authSvc, pluginRegistry, config),
 		searchAPI.NewHandler(finalSearchSvc, userSvc, authSvc, metricsService, config),
 		schedulesAPI.NewHandler(scheduleSvc, runsSvc, userSvc, authSvc, scheduleEncryptor, config, encryptionConfigured),
 		websocket.NewHandler(wsHub, userSvc, authSvc, config),

@@ -99,6 +99,6 @@ func TestSource_ValidateDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, s.config)
-	assert.Equal(t, "test-project", s.config.ProjectID)
-	assert.Equal(t, "/path/to/creds.json", s.config.CredentialsFile)
+	assert.Equal(t, "test-project", s.connConfig.ProjectID)
+	assert.Equal(t, "/path/to/creds.json", s.connConfig.CredentialsFile)
 }

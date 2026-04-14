@@ -48,7 +48,7 @@ The following configuration options are available:
 |----------|------|----------|-------------|
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| table_paths | []string | false | Paths to Delta Lake table directories |
+| table_paths | []string | true | Paths to Delta Lake table directories |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
 
 ## Available Metadata

@@ -15,24 +15,23 @@ func TestSource_Validate(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid host config",
+			name: "valid config with plugin fields",
+			config: plugin.RawPluginConfig{
+				"filter": map[string]interface{}{
+					"include": []interface{}{"^ORDERS"},
+				},
+			},
+		},
+		{
+			name: "empty config",
+			config: plugin.RawPluginConfig{},
+		},
+		{
+			name: "with host and port",
 			config: plugin.RawPluginConfig{
 				"host": "localhost",
 				"port": 4222,
 			},
-		},
-		{
-			name:    "missing host",
-			config:  plugin.RawPluginConfig{},
-			wantErr: "host",
-		},
-		{
-			name: "invalid port",
-			config: plugin.RawPluginConfig{
-				"host": "localhost",
-				"port": 99999,
-			},
-			wantErr: "port",
 		},
 		{
 			name: "with token",
@@ -46,15 +45,6 @@ func TestSource_Validate(t *testing.T) {
 			config: plugin.RawPluginConfig{
 				"host":             "localhost",
 				"credentials_file": "/path/to/creds.creds",
-			},
-		},
-		{
-			name: "with filter",
-			config: plugin.RawPluginConfig{
-				"host": "localhost",
-				"filter": map[string]interface{}{
-					"include": []interface{}{"^ORDERS"},
-				},
 			},
 		},
 	}
@@ -74,10 +64,11 @@ func TestSource_Validate(t *testing.T) {
 }
 
 func TestSource_ValidateDefaults(t *testing.T) {
+	// Validate no longer sets connConfig - it's set by Discover
+	// Just verify that Validate succeeds
 	s := &Source{}
 	_, err := s.Validate(plugin.RawPluginConfig{
 		"host": "localhost",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 4222, s.config.Port)
 }

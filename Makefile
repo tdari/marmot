@@ -38,6 +38,8 @@ generate:
 	# Cleanup old docs before generating
 	find web/docs/docs/Plugins -type f ! -name "index.md" ! -name "_category_.json" -delete
 	find web/docs/docs/Plugins -type d -empty -delete
+	find web/docs/docs/Connections -type f ! -name "index.md" ! -name "_category_.json" -delete
+	find web/docs/docs/Connections -type d -empty -delete
 	go generate ./...
 
 lint: frontend-lint

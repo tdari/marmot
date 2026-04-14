@@ -101,5 +101,5 @@ func TestSource_ValidateDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, s.config)
-	assert.Equal(t, "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key123;EndpointSuffix=core.windows.net", s.config.ConnectionString)
+	assert.Equal(t, "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key123;EndpointSuffix=core.windows.net", s.connConfig.ConnectionString)
 }

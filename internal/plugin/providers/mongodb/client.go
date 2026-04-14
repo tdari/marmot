@@ -14,23 +14,23 @@ import (
 func (s *Source) connect(ctx context.Context) error {
 	var uri string
 
-	if s.config.ConnectionURI != "" {
-		uri = s.config.ConnectionURI
+	if s.connConfig.ConnectionURI != "" {
+		uri = s.connConfig.ConnectionURI
 	} else {
 		authPart := ""
-		if s.config.User != "" {
-			authPart = fmt.Sprintf("%s:%s@", s.config.User, s.config.Password)
+		if s.connConfig.User != "" {
+			authPart = fmt.Sprintf("%s:%s@", s.connConfig.User, s.connConfig.Password)
 		}
 
 		authSource := ""
-		if s.config.AuthSource != "" {
-			authSource = fmt.Sprintf("authSource=%s", s.config.AuthSource)
+		if s.connConfig.AuthSource != "" {
+			authSource = fmt.Sprintf("authSource=%s", s.connConfig.AuthSource)
 		}
 
 		tlsParam := ""
-		if s.config.TLS {
+		if s.connConfig.TLS {
 			tlsParam = "tls=true"
-			if s.config.TLSInsecure {
+			if s.connConfig.TLSInsecure {
 				tlsParam += "&tlsInsecure=true"
 			}
 		}
@@ -47,7 +47,7 @@ func (s *Source) connect(ctx context.Context) error {
 			paramStr = "?" + strings.Join(params, "&")
 		}
 
-		uri = fmt.Sprintf("mongodb://%s%s:%d/%s", authPart, s.config.Host, s.config.Port, paramStr)
+		uri = fmt.Sprintf("mongodb://%s%s:%d/%s", authPart, s.connConfig.Host, s.connConfig.Port, paramStr)
 	}
 
 	clientOptions := options.Client().ApplyURI(uri)

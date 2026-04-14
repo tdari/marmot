@@ -27,12 +27,13 @@ func init() {
 	})
 
 	meta := plugin.PluginMeta{
-		ID:          "confluent",
-		Name:        "Confluent Cloud",
-		Description: "Discover Kafka topics from Confluent Cloud clusters",
-		Icon:        "confluent",
-		Category:    "streaming",
-		ConfigSpec:  spec,
+		ID:              "confluent",
+		Name:            "Confluent Cloud",
+		Description:     "Discover Kafka topics from Confluent Cloud clusters",
+		Icon:            "confluent",
+		Category:        "streaming",
+		ConfigSpec:      spec,
+		ConnectionTypes: []string{"kafka"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &kafka.Source{}); err != nil {

@@ -59,7 +59,7 @@ The following configuration options are available:
 | environment | string | false | Environment name (e.g., production, staging) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| spec_path | string | false | Path to AsyncAPI spec file or directory containing specs |
+| spec_path | string | true | Path to AsyncAPI spec file or directory containing specs |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
 
 ## Available Metadata

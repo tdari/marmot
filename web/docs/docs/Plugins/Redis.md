@@ -44,9 +44,6 @@ ACL SETUSER marmot_reader on >password ~* &* +info +ping +select
 
 ```yaml
 
-host: "localhost"
-port: 6379
-password: "secret"
 discover_all_databases: true
 filter:
   include:
@@ -62,17 +59,10 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| db | int | false | Default database number |
 | discover_all_databases | bool | false | Discover all databases with keys (db0-db15) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
-| host | string | false | Redis server hostname or IP address |
-| password | string | false | Password for authentication |
-| port | int | false | Redis server port |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
-| tls | bool | false | Enable TLS connection |
-| tls_insecure | bool | false | Skip TLS certificate verification |
-| username | string | false | Username for ACL authentication |
 
 ## Available Metadata
 

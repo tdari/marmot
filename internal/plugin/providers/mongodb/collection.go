@@ -56,8 +56,8 @@ func (s *Source) discoverCollections(ctx context.Context, dbName string) ([]asse
 		}
 
 		metadata := make(map[string]interface{})
-		metadata["host"] = s.config.Host
-		metadata["port"] = s.config.Port
+		metadata["host"] = s.connConfig.Host
+		metadata["port"] = s.connConfig.Port
 		metadata["database"] = dbName
 		metadata["collection"] = collName
 		metadata["object_type"] = collInfo.Type

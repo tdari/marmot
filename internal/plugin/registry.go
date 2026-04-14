@@ -47,20 +47,21 @@ type FieldOption struct {
 }
 
 type Validation struct {
-	Pattern string      `json:"pattern,omitempty"`
-	Min     *int        `json:"min,omitempty"`
-	Max     *int        `json:"max,omitempty"`
-	MinLen  *int        `json:"min_len,omitempty"`
-	MaxLen  *int        `json:"max_len,omitempty"`
+	Pattern string `json:"pattern,omitempty"`
+	Min     *int   `json:"min,omitempty"`
+	Max     *int   `json:"max,omitempty"`
+	MinLen  *int   `json:"min_len,omitempty"`
+	MaxLen  *int   `json:"max_len,omitempty"`
 }
 
 type PluginMeta struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Icon        string        `json:"icon"`
-	Category    string        `json:"category"`
-	ConfigSpec  []ConfigField `json:"config_spec"`
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	Description     string        `json:"description"`
+	Icon            string        `json:"icon"`
+	Category        string        `json:"category"`
+	ConfigSpec      []ConfigField `json:"config_spec"`
+	ConnectionTypes []string      `json:"connection_types,omitempty"`
 }
 
 func GenerateConfigSpec(configType interface{}) []ConfigField {
@@ -446,4 +447,141 @@ func (r *Registry) List() []PluginMeta {
 	}
 
 	return metas
+}
+
+// ValidateConfig validates a config map against a ConfigSpec
+func ValidateConfig(config map[string]interface{}, spec []ConfigField) error {
+	return validateConfigRecursive(config, spec, "")
+}
+
+func validateConfigRecursive(config map[string]interface{}, spec []ConfigField, prefix string) error {
+	for _, field := range spec {
+		fieldPath := field.Name
+		if prefix != "" {
+			fieldPath = prefix + "." + field.Name
+		}
+
+		value, exists := config[field.Name]
+
+		// Check required fields
+		if field.Required {
+			if !exists || isEmptyValue(value) {
+				return fmt.Errorf("%s is required", fieldPath)
+			}
+		}
+
+		// Skip validation if field doesn't exist and isn't required
+		if !exists {
+			continue
+		}
+
+		// Skip empty values for non-required fields
+		if isEmptyValue(value) {
+			continue
+		}
+
+		// Type validation
+		if err := validateFieldType(value, field, fieldPath); err != nil {
+			return err
+		}
+
+		// Validate nested objects
+		if field.Type == FieldTypeObject && len(field.Fields) > 0 {
+			if field.IsArray {
+				// Validate array of objects
+				arr, ok := value.([]interface{})
+				if !ok {
+					return fmt.Errorf("%s must be an array", fieldPath)
+				}
+				for i, item := range arr {
+					itemMap, ok := item.(map[string]interface{})
+					if !ok {
+						return fmt.Errorf("%s[%d] must be an object", fieldPath, i)
+					}
+					if err := validateConfigRecursive(itemMap, field.Fields, fmt.Sprintf("%s[%d]", fieldPath, i)); err != nil {
+						return err
+					}
+				}
+			} else {
+				// Validate single nested object
+				nestedMap, ok := value.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("%s must be an object", fieldPath)
+				}
+				if err := validateConfigRecursive(nestedMap, field.Fields, fieldPath); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func isEmptyValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val == ""
+	case []interface{}:
+		return len(val) == 0
+	case map[string]interface{}:
+		return len(val) == 0
+	default:
+		return false
+	}
+}
+
+func validateFieldType(value interface{}, field ConfigField, fieldPath string) error {
+	switch field.Type {
+	case FieldTypeString, FieldTypePassword:
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%s must be a string", fieldPath)
+		}
+	case FieldTypeInt:
+		switch value.(type) {
+		case int, int64, float64:
+			// JSON numbers can come as float64
+		default:
+			return fmt.Errorf("%s must be a number", fieldPath)
+		}
+	case FieldTypeBool:
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("%s must be a boolean", fieldPath)
+		}
+	case FieldTypeSelect:
+		str, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("%s must be a string", fieldPath)
+		}
+		// Validate against options if provided
+		if len(field.Options) > 0 {
+			valid := false
+			for _, opt := range field.Options {
+				if opt.Value == str {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return fmt.Errorf("%s must be one of the allowed values", fieldPath)
+			}
+		}
+	case FieldTypeMultiselect:
+		arr, ok := value.([]interface{})
+		if !ok {
+			return fmt.Errorf("%s must be an array", fieldPath)
+		}
+		// Each element should be a string
+		for i, item := range arr {
+			if _, ok := item.(string); !ok {
+				return fmt.Errorf("%s[%d] must be a string", fieldPath, i)
+			}
+		}
+	}
+
+	return nil
 }

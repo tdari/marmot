@@ -9,13 +9,14 @@ package iceberg
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/apache/iceberg-go/catalog"
 	gluecat "github.com/apache/iceberg-go/catalog/glue"
 	"github.com/apache/iceberg-go/catalog/rest"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionaws "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
+	connectioniceberg "github.com/marmotdata/marmot/internal/core/connection/providers/iceberg"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -25,17 +26,8 @@ import (
 // +marmot:config
 type Config struct {
 	plugin.BaseConfig `json:",inline"`
-	*plugin.AWSConfig `json:",inline"`
 
 	CatalogType string `json:"catalog_type" description:"Catalog backend type" default:"rest" validate:"omitempty,oneof=rest glue"`
-
-	// REST catalog fields
-	URI        string            `json:"uri" description:"REST catalog URI (required for catalog_type=rest)" show_when:"catalog_type:rest"`
-	Warehouse  string            `json:"warehouse" description:"Warehouse identifier" show_when:"catalog_type:rest"`
-	Credential string            `json:"credential" description:"Credential for OAuth2 client credentials authentication" sensitive:"true" show_when:"catalog_type:rest"`
-	Token      string            `json:"token" description:"Bearer token for authentication" sensitive:"true" show_when:"catalog_type:rest"`
-	Properties map[string]string `json:"properties" description:"Additional catalog properties" show_when:"catalog_type:rest"`
-	Prefix     string            `json:"prefix" description:"Optional prefix for the REST catalog" show_when:"catalog_type:rest"`
 
 	// Glue catalog fields
 	GlueCatalogID string `json:"glue_catalog_id" description:"AWS Glue Data Catalog ID (defaults to caller's account)" show_when:"catalog_type:glue"`
@@ -46,23 +38,18 @@ type Config struct {
 
 // +marmot:example-config
 var _ = `
-# REST catalog (default)
-uri: "http://localhost:8181"
-warehouse: "my-warehouse"
-credential: "client-id:client-secret"
+catalog_type: "rest"
+include_namespaces: true
+include_views: true
 tags:
   - "iceberg"
-
-# Glue catalog:
-# catalog_type: "glue"
-# credentials:
-#   region: "us-east-1"
-# glue_catalog_id: "123456789012"  # optional, defaults to caller's account
 `
 
 type Source struct {
-	config *Config
-	cat    catalog.Catalog
+	config         *Config
+	restConnConfig *connectioniceberg.IcebergRESTConfig
+	awsConnConfig  *connectionaws.AWSConfig
+	cat            catalog.Catalog
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -83,16 +70,6 @@ func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginCon
 
 	if err := plugin.ValidateStruct(config); err != nil {
 		return nil, err
-	}
-
-	if config.CatalogType == "rest" {
-		if config.URI == "" {
-			return nil, fmt.Errorf("uri is required when catalog_type is rest")
-		}
-		u, err := url.ParseRequestURI(config.URI)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("uri must be a valid URL")
-		}
 	}
 
 	s.config = config
@@ -119,24 +96,30 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 
 	switch config.CatalogType {
 	case "rest":
+		restConn, err := plugin.UnmarshalPluginConfig[connectioniceberg.IcebergRESTConfig](pluginConfig)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshaling REST connection config: %w", err)
+		}
+		s.restConnConfig = restConn
+
 		var opts []rest.Option
-		if config.Credential != "" {
-			opts = append(opts, rest.WithCredential(config.Credential))
+		if s.restConnConfig.Credential != "" {
+			opts = append(opts, rest.WithCredential(s.restConnConfig.Credential))
 		}
-		if config.Token != "" {
-			opts = append(opts, rest.WithOAuthToken(config.Token))
+		if s.restConnConfig.Token != "" {
+			opts = append(opts, rest.WithOAuthToken(s.restConnConfig.Token))
 		}
-		if config.Warehouse != "" {
-			opts = append(opts, rest.WithWarehouseLocation(config.Warehouse))
+		if s.restConnConfig.Warehouse != "" {
+			opts = append(opts, rest.WithWarehouseLocation(s.restConnConfig.Warehouse))
 		}
-		if config.Prefix != "" {
-			opts = append(opts, rest.WithPrefix(config.Prefix))
+		if s.restConnConfig.Prefix != "" {
+			opts = append(opts, rest.WithPrefix(s.restConnConfig.Prefix))
 		}
-		if len(config.Properties) > 0 {
-			opts = append(opts, rest.WithAdditionalProps(config.Properties))
+		if len(s.restConnConfig.Properties) > 0 {
+			opts = append(opts, rest.WithAdditionalProps(s.restConnConfig.Properties))
 		}
 
-		cat, err := rest.NewCatalog(ctx, "rest", config.URI, opts...)
+		cat, err := rest.NewCatalog(ctx, "rest", s.restConnConfig.URI, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("creating REST catalog: %w", err)
 		}
@@ -147,12 +130,13 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 		ctx = cat.SetPageSize(ctx, -1)
 
 	case "glue":
-		awsConfig, err := plugin.ExtractAWSConfig(pluginConfig)
+		awsConn, err := plugin.UnmarshalPluginConfig[connectionaws.AWSConfig](pluginConfig)
 		if err != nil {
-			return nil, fmt.Errorf("extracting AWS config: %w", err)
+			return nil, fmt.Errorf("unmarshaling AWS connection config: %w", err)
 		}
+		s.awsConnConfig = awsConn
 
-		awsCfg, err := awsConfig.NewAWSConfig(ctx)
+		awsCfg, err := s.awsConnConfig.NewAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("creating AWS config: %w", err)
 		}
@@ -269,12 +253,13 @@ func init() {
 	}
 
 	meta := plugin.PluginMeta{
-		ID:          "iceberg",
-		Name:        "Apache Iceberg",
-		Description: "Discover namespaces, tables and views from Iceberg catalogs (REST and AWS Glue)",
-		Icon:        "iceberg",
-		Category:    "data-lake",
-		ConfigSpec:  spec,
+		ID:              "iceberg",
+		Name:            "Apache Iceberg",
+		Description:     "Discover namespaces, tables and views from Iceberg catalogs (REST and AWS Glue)",
+		Icon:            "iceberg",
+		Category:        "data-lake",
+		ConfigSpec:      spec,
+		ConnectionTypes: []string{"iceberg-rest", "aws"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &Source{}); err != nil {

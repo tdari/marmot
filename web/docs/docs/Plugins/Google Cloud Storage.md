@@ -82,8 +82,6 @@ Or use a custom role with these permissions:
 
 ```yaml
 
-project_id: "my-gcp-project"
-credentials_file: "/path/to/service-account.json"
 include_metadata: true
 include_object_count: false
 filter:
@@ -102,15 +100,10 @@ The following configuration options are available:
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| credentials_file | string | false | Path to service account JSON file |
-| credentials_json | string | false | Service account JSON content |
-| disable_auth | bool | false | Disable authentication (for local emulators) |
-| endpoint | string | false | Custom endpoint URL (for fake-gcs-server or other emulators) |
 | external_links | []ExternalLink | false | External links to show on all assets |
 | filter | Filter | false | Filter discovered assets by name (regex) |
 | include_metadata | bool | false | Include bucket metadata like labels |
 | include_object_count | bool | false | Count objects in each bucket (can be slow for large buckets) |
-| project_id | string | false | Google Cloud project ID |
 | tags | TagsConfig | false | Tags to apply to discovered assets |
 
 ## Available Metadata

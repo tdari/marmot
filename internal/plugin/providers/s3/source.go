@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/marmotdata/marmot/internal/core/asset"
+	connectionaws "github.com/marmotdata/marmot/internal/core/connection/providers/aws"
 	"github.com/marmotdata/marmot/internal/core/lineage"
 	"github.com/marmotdata/marmot/internal/mrn"
 	"github.com/marmotdata/marmot/internal/plugin"
@@ -31,17 +32,14 @@ type Config struct {
 // Example configuration for the plugin
 // +marmot:example-config
 var _ = `
-credentials:
-  region: "us-east-1" 
-  id: "<aws-secret-id>"
-  secret: "<aws-secret-key>"
 tags:
   - "s3"
 `
 
 type Source struct {
-	config *Config
-	client *s3.Client
+	config     *Config
+	connConfig *connectionaws.AWSConfig
+	client     *s3.Client
 }
 
 func (s *Source) Validate(rawConfig plugin.RawPluginConfig) (plugin.RawPluginConfig, error) {
@@ -65,12 +63,13 @@ func (s *Source) Discover(ctx context.Context, pluginConfig plugin.RawPluginConf
 	}
 	s.config = config
 
-	awsConfig, err := plugin.ExtractAWSConfig(pluginConfig)
+	connConfig, err := plugin.UnmarshalPluginConfig[connectionaws.AWSConfig](pluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("extracting AWS config: %w", err)
+		return nil, fmt.Errorf("unmarshaling connection config: %w", err)
 	}
+	s.connConfig = connConfig
 
-	awsCfg, err := awsConfig.NewAWSConfig(ctx)
+	awsCfg, err := s.connConfig.NewAWSConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating AWS config: %w", err)
 	}
@@ -252,12 +251,13 @@ func (s *Source) createBucketAsset(ctx context.Context, bucket types.Bucket) (as
 
 func init() {
 	meta := plugin.PluginMeta{
-		ID:          "s3",
-		Name:        "AWS S3",
-		Description: "Discover S3 buckets from AWS accounts",
-		Icon:        "s3",
-		Category:    "storage",
-		ConfigSpec:  plugin.GenerateConfigSpec(Config{}),
+		ID:              "s3",
+		Name:            "AWS S3",
+		Description:     "Discover S3 buckets from AWS accounts",
+		Icon:            "s3",
+		Category:        "storage",
+		ConfigSpec:      plugin.GenerateConfigSpec(Config{}),
+		ConnectionTypes: []string{"aws"},
 	}
 
 	if err := plugin.GetRegistry().Register(meta, &Source{}); err != nil {
